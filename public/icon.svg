@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="48" y1="36" x2="464" y2="476" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0d9488" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="flap" x1="120" y1="128" x2="360" y2="210" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#a7f3d0" />
+      <stop offset="100%" stop-color="#6ee7b7" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="124" fill="url(#bg)" />
+  <!-- Wallet back flap -->
+  <path d="M126 176c0-26.5 21.5-48 48-48h154c19.9 0 36 16.1 36 36v28H126v-16z" fill="url(#flap)" opacity="0.92" />
+  <!-- Wallet main body -->
+  <rect x="112" y="172" width="288" height="212" rx="40" fill="#ffffff" />
+  <!-- Wallet clasp pocket -->
+  <path d="M312 246h88v64h-88c-17.7 0-32-14.3-32-32s14.3-32 32-32z" fill="#0f1b22" fill-opacity="0.12" />
+  <circle cx="318" cy="278" r="16" fill="#059669" />
+</svg>

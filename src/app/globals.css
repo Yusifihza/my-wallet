@@ -1,26 +1,153 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* My Wallet Design System — Default Dark + Emerald/Teal Accent, Clean Light Mode */
+:root,
+html[data-theme="dark"] {
+  --mw-bg: #0a1015;
+  --mw-surface: #111920;
+  --mw-surface-2: #17222c;
+  --mw-surface-3: #1f2d3a;
+  --mw-border: #243442;
+  --mw-border-subtle: rgba(148, 163, 184, 0.12);
+  --mw-text: #eef4f7;
+  --mw-text-muted: #8ca1b1;
+  --mw-text-dim: #627788;
+
+  /* Primary brand: Emerald / Teal */
+  --mw-primary: #10b981;
+  --mw-primary-hover: #059669;
+  --mw-primary-soft: rgba(16, 185, 129, 0.14);
+  --mw-teal: #14b8a6;
+
+  /* Transaction semantics (Blueprint §5: Income green, Expense coral, Saving sky, Transfer slate) */
+  --mw-income: #34d399;
+  --mw-income-soft: rgba(52, 211, 153, 0.14);
+  --mw-expense: #f87171;
+  --mw-expense-soft: rgba(248, 113, 113, 0.14);
+  --mw-saving: #38bdf8;
+  --mw-saving-soft: rgba(56, 189, 248, 0.14);
+  --mw-transfer: #94a3b8;
+  --mw-transfer-soft: rgba(148, 163, 184, 0.16);
+  --mw-warn: #fbbf24;
+  --mw-warn-soft: rgba(251, 191, 36, 0.14);
+
+  --mw-backdrop: rgba(4, 9, 13, 0.72);
+  --mw-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.18);
+  color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  --mw-bg: #f4f7f9;
+  --mw-surface: #ffffff;
+  --mw-surface-2: #f1f5f8;
+  --mw-surface-3: #e3ebf0;
+  --mw-border: #d8e2e9;
+  --mw-border-subtle: rgba(15, 28, 36, 0.08);
+  --mw-text: #0f1c24;
+  --mw-text-muted: #516675;
+  --mw-text-dim: #7b909e;
+
+  --mw-primary: #059669;
+  --mw-primary-hover: #047857;
+  --mw-primary-soft: rgba(5, 150, 105, 0.11);
+  --mw-teal: #0d9488;
+
+  --mw-income: #059669;
+  --mw-income-soft: rgba(5, 150, 105, 0.11);
+  --mw-expense: #dc2626;
+  --mw-expense-soft: rgba(220, 38, 38, 0.1);
+  --mw-saving: #0284c7;
+  --mw-saving-soft: rgba(2, 132, 199, 0.11);
+  --mw-transfer: #475569;
+  --mw-transfer-soft: rgba(71, 85, 105, 0.11);
+  --mw-warn: #d97706;
+  --mw-warn-soft: rgba(217, 119, 6, 0.12);
+
+  --mw-backdrop: rgba(15, 28, 36, 0.45);
+  --mw-card-shadow: 0 1px 2px rgba(15, 28, 36, 0.05), 0 6px 20px rgba(15, 28, 36, 0.05);
+  color-scheme: light;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-plus-jakarta), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  background: var(--mw-bg);
+  color: var(--mw-text);
+  font-family: var(--font-sans);
+  min-height: 100%;
+}
+
+.tab-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.mw-card {
+  background: var(--mw-surface);
+  border: 1px solid var(--mw-border);
+  box-shadow: var(--mw-card-shadow);
+}
+
+.mw-hero-gradient {
+  background: linear-gradient(135deg, #0b4f4a 0%, #065f46 55%, #047857 100%);
+}
+
+html[data-theme="light"] .mw-hero-gradient {
+  background: linear-gradient(135deg, #0d6e67 0%, #057a55 55%, #059669 100%);
+}
+
+/* Custom sleek scrollbars */
+.mw-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.mw-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.mw-scroll::-webkit-scrollbar-thumb {
+  background: var(--mw-border);
+  border-radius: 999px;
+}
+
+/* Safe area bottom padding for notched phones / PWA standalone */
+.pb-safe {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+@keyframes slideUpSheet {
+  from {
+    transform: translateY(24px);
+    opacity: 0.4;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@keyframes slideInRight {
+  from {
+    transform: translateX(28px);
+    opacity: 0.4;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-sheet-up {
+  animation: slideUpSheet 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animate-panel-right {
+  animation: slideInRight 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }

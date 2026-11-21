@@ -1,36 +1,43 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# My Wallet — Personal Budget Tracker PWA
 
-## Getting Started
+Web app budget tracker personal responsif (**Mobile-first PWA + Desktop Dashboard**), dibangun dengan **Next.js (App Router) + TypeScript + Tailwind CSS + Recharts + Supabase**.
 
-First, run the development server:
+## Fitur Fase 1 (MVP)
+- **Logo dompet My Wallet** · Tema default **Dark** (Light mode tersedia) · Aksen **Emerald/Teal** · **Mode Privasi** (`👁️`)
+- **Input Transaksi Cepat** (`N` di desktop, tombol `+` di mobile):
+  - **Mobile:** Bottom sheet dengan numpad kustom (`000`, `,`, `+`/`−`, `×rb`, `×jt`, `+10rb`/`+50rb`/`+100rb`)
+  - **Desktop:** Side panel dengan parser keyboard (`25rb`, `1,5jt`, `45k+12k`) dan `Ctrl+Enter`
+  - **Searchable Category Picker** lengkap dengan semua kategori seed, alias pencarian (`ojol`, `kopi`, `kos`, dll.), 5 sering dipakai, sisa budget, dan deteksi pintar *"tarik tunai"* / *"top up"* → Transfer
+  - **Grouped Wallet Picker** dengan live preview saldo sesudah transaksi & peringatan saldo minus
+  - **Transfer Antar Wallet** (swap `⇄`, biaya admin opsional → dicatat ke *Lainnya › Biaya*, pokok transfer tidak masuk Expense)
+  - **Saving & Saving Withdrawal** terhubung ke Target Tabungan (Goals)
+- **Live Wallet Balance** (`/wallets`): 12 dompet aktif (Tunai, Jago, Krom, BNI, Mandiri, GoPay, ShopeePay, DANA, LinkAja, OVO, Mandiri e-money, Bibit) + template Kartu Kredit tersembunyi, mutasi per wallet, grafik saldo 30 hari, rekonsiliasi saldo otomatis, dan update nilai pasar Bibit
+- **Dashboard & Grafik** (`/`) + **Riwayat Transaksi** (`/transactions`) + **Budget Bulanan Interpretasi B** (`/budget`) + **Goals** (`/goals`) + **Settings & Export CSV** (`/settings`)
+- **Installable PWA** (`manifest.webmanifest` + Service Worker offline shell)
 
+## Cara Menjalankan Lokal
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
+Aplikasi bisa langsung dicoba menggunakan **Mode Lokal (offline)** tanpa konfigurasi apa pun.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Menghubungkan Supabase (Sinkron HP & Laptop + Login Google)
+1. Buat project gratis di [supabase.com](https://supabase.com).
+2. Buka **SQL Editor** di dashboard Supabase, lalu jalankan isi file [`supabase/migrations/001_initial_schema.sql`](./supabase/migrations/001_initial_schema.sql).
+3. Buka **Authentication → Providers → Google**, aktifkan Google Sign-In, dan masukkan Redirect URL `https://<domain-vercel-kamu>/auth/callback` (dan `http://localhost:3000/auth/callback` untuk lokal).
+4. Salin `.env.example` ke `.env.local` (dan tambahkan juga di Environment Variables Vercel):
+   ```env
+   NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+   ```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deploy ke Vercel
+1. Hubungkan repository GitHub `Yusifihza/my-wallet` di [vercel.com](https://vercel.com).
+2. Tambahkan `NEXT_PUBLIC_SUPABASE_URL` dan `NEXT_PUBLIC_SUPABASE_ANON_KEY` di Project Settings → Environment Variables.
+3. Deploy — buka URL-nya di HP lalu pilih **Add to Home Screen** untuk meng-install sebagai aplikasi fullscreen.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Menjalankan Unit Test
+```bash
+npm test
+```

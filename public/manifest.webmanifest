@@ -1,0 +1,19 @@
+{
+  "name": "My Wallet — Personal Budget Tracker",
+  "short_name": "My Wallet",
+  "description": "Catat pemasukan, pengeluaran, transfer antar dompet, budget, dan target tabungan dari HP maupun desktop.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1116",
+  "theme_color": "#059669",
+  "lang": "id",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
