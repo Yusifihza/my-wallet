@@ -186,7 +186,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      if (isLocalModeOptedIn()) {
+      if (!supabase || isLocalModeOptedIn()) {
+        setLocalModeOptIn(true);
         const local = loadLocalDataset();
         if (!active) return;
         setClientNow(now);
