@@ -285,6 +285,44 @@ export function calculateNetWorth(balances: WalletBalanceSummary[]) {
 
 // ==================== PERIOD FILTERING & SUMMARY ====================
 
+export interface PeriodOption {
+  value: PeriodPreset;
+  label: string;
+}
+
+/**
+ * Generates period dropdown options: current month, previous month,
+ * monthly steps up to 6 months back, 3-month aggregate, current year, and all time.
+ */
+export function buildPeriodOptions(referenceDate = new Date()): PeriodOption[] {
+  const y = referenceDate.getFullYear();
+  const m = referenceDate.getMonth();
+  const options: PeriodOption[] = [];
+
+  for (let offset = 0; offset <= 6; offset++) {
+    const d = new Date(y, m - offset, 1);
+    const yr = d.getFullYear();
+    const mo = d.getMonth();
+    const shortLabel = `${MONTHS_SHORT[mo]} ${yr}`;
+    if (offset === 0) {
+      options.push({ value: 'this_month', label: `Bulan ini (${shortLabel})` });
+    } else if (offset === 1) {
+      options.push({ value: 'last_month', label: `Bulan lalu (${shortLabel})` });
+    } else {
+      const ym = `${yr}-${String(mo + 1).padStart(2, '0')}`;
+      options.push({ value: `month:${ym}`, label: `${MONTHS_LONG[mo]} ${yr}` });
+    }
+  }
+
+  options.push(
+    { value: 'last_3_months', label: '3 Bulan Terakhir' },
+    { value: 'this_year', label: `Tahun ${y}` },
+    { value: 'all', label: 'Semua Waktu' }
+  );
+
+  return options;
+}
+
 export function getPeriodRange(
   preset: PeriodPreset,
   referenceDate = new Date()
@@ -302,6 +340,16 @@ export function getPeriodRange(
     const start = toISODate(prev);
     const end = toISODate(new Date(prev.getFullYear(), prev.getMonth() + 1, 0));
     return { start, end, label: formatMonthYearID(prev.getFullYear(), prev.getMonth()) };
+  }
+  if (preset.startsWith('month:')) {
+    const [yrStr, moStr] = preset.slice(6).split('-');
+    const yr = Number(yrStr);
+    const mo = Number(moStr) - 1;
+    if (!Number.isNaN(yr) && !Number.isNaN(mo) && mo >= 0 && mo <= 11) {
+      const start = toISODate(new Date(yr, mo, 1));
+      const end = toISODate(new Date(yr, mo + 1, 0));
+      return { start, end, label: formatMonthYearID(yr, mo) };
+    }
   }
   if (preset === 'last_3_months') {
     const start = toISODate(new Date(y, m - 2, 1));
@@ -392,7 +440,7 @@ export function calculateCategoryBudgets(
   categories: Category[],
   subcategories: Subcategory[],
   transactions: Transaction[],
-  type: 'expense' | 'saving' = 'expense'
+  type: 'income' | 'expense' | 'saving' = 'expense'
 ): {
   items: CategoryBudgetStatus[];
   totalEffectiveBudget: number;
@@ -402,7 +450,11 @@ export function calculateCategoryBudgets(
   let transferFeeExpense = 0;
 
   for (const tx of transactions) {
-    if (type === 'expense') {
+    if (type === 'income') {
+      if (tx.type === 'income' && tx.subcategoryId) {
+        spentBySub.set(tx.subcategoryId, (spentBySub.get(tx.subcategoryId) ?? 0) + tx.amount);
+      }
+    } else if (type === 'expense') {
       if (tx.type === 'expense' && tx.subcategoryId) {
         spentBySub.set(tx.subcategoryId, (spentBySub.get(tx.subcategoryId) ?? 0) + tx.amount);
       }
@@ -463,9 +515,14 @@ export function calculateCategoryBudgets(
 
     let status: CategoryBudgetStatus['status'] = 'track';
     if (pct !== null) {
-      if (pct >= 100) status = 'over';
-      else if (pct >= 80) status = 'warn';
-      else status = 'safe';
+      if (type === 'expense') {
+        if (pct >= 100) status = 'over';
+        else if (pct >= 80) status = 'warn';
+        else status = 'safe';
+      } else {
+        // For income & saving, higher progress is positive
+        status = 'safe';
+      }
     }
 
     if (effectiveBudget !== null) totalEffectiveBudget += effectiveBudget;
@@ -490,14 +547,7 @@ export function calculateZeroBasedAllocation(
   categories: Category[],
   subcategories: Subcategory[]
 ) {
-  const incomeTarget = subcategories
-    .filter((s) => !s.archived)
-    .filter((s) => {
-      const cat = categories.find((c) => c.id === s.categoryId);
-      return cat && cat.type === 'income' && !cat.archived;
-    })
-    .reduce((sum, s) => sum + (s.monthlyBudget ?? 0), 0);
-
+  const incomeTarget = calculateCategoryBudgets(categories, subcategories, [], 'income').totalEffectiveBudget;
   const expenseBudget = calculateCategoryBudgets(categories, subcategories, [], 'expense').totalEffectiveBudget;
   const savingBudget = calculateCategoryBudgets(categories, subcategories, [], 'saving').totalEffectiveBudget;
 

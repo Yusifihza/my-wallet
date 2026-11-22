@@ -21,7 +21,7 @@ export function BudgetView() {
   } = useWallet();
 
   const privacy = dataset.profile.privacyMode;
-  const [activeType, setActiveType] = useState<'expense' | 'saving'>('expense');
+  const [activeType, setActiveType] = useState<'income' | 'expense' | 'saving'>('expense');
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
   const [editingTarget, setEditingTarget] = useState<{
     kind: 'cat' | 'sub';
@@ -83,6 +83,17 @@ export function BudgetView() {
         <div className="inline-flex p-1 rounded-xl bg-[var(--mw-surface)] border border-[var(--mw-border)] text-xs font-semibold">
           <button
             type="button"
+            onClick={() => setActiveType('income')}
+            className="px-3.5 py-1.5 rounded-lg cursor-pointer transition"
+            style={{
+              background: activeType === 'income' ? 'var(--mw-income-soft)' : 'transparent',
+              color: activeType === 'income' ? 'var(--mw-income)' : 'var(--mw-text-muted)',
+            }}
+          >
+            Income
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveType('expense')}
             className="px-3.5 py-1.5 rounded-lg cursor-pointer transition"
             style={{
@@ -106,31 +117,31 @@ export function BudgetView() {
         </div>
       </div>
 
-      {/* Zero-Based Budget Helper */}
+      {/* Zero-Based Budget Helper (vertical stack on mobile, 4 columns on desktop) */}
       <div className="mw-card rounded-2xl p-4 sm:p-5 space-y-3">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-          <div className="p-3 rounded-xl bg-[var(--mw-surface-2)]">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5 text-xs">
+          <div className="p-3 rounded-xl bg-[var(--mw-surface-2)] flex items-center justify-between md:block gap-2">
             <div className="text-[var(--mw-text-muted)]">Target Income</div>
-            <div className="text-base font-bold tab-num mt-0.5" style={{ color: 'var(--mw-income)' }}>
+            <div className="text-sm sm:text-base font-bold tab-num md:mt-0.5" style={{ color: 'var(--mw-income)' }}>
               {formatIDR(allocation.incomeTarget, privacy)}
             </div>
           </div>
-          <div className="p-3 rounded-xl bg-[var(--mw-surface-2)]">
+          <div className="p-3 rounded-xl bg-[var(--mw-surface-2)] flex items-center justify-between md:block gap-2">
             <div className="text-[var(--mw-text-muted)]">Budget Expense</div>
-            <div className="text-base font-bold tab-num mt-0.5" style={{ color: 'var(--mw-expense)' }}>
+            <div className="text-sm sm:text-base font-bold tab-num md:mt-0.5" style={{ color: 'var(--mw-expense)' }}>
               {formatIDR(allocation.expenseBudget, privacy)}
             </div>
           </div>
-          <div className="p-3 rounded-xl bg-[var(--mw-surface-2)]">
+          <div className="p-3 rounded-xl bg-[var(--mw-surface-2)] flex items-center justify-between md:block gap-2">
             <div className="text-[var(--mw-text-muted)]">Budget Saving</div>
-            <div className="text-base font-bold tab-num mt-0.5" style={{ color: 'var(--mw-saving)' }}>
+            <div className="text-sm sm:text-base font-bold tab-num md:mt-0.5" style={{ color: 'var(--mw-saving)' }}>
               {formatIDR(allocation.savingBudget, privacy)}
             </div>
           </div>
-          <div className="p-3 rounded-xl bg-[var(--mw-surface-2)]">
+          <div className="p-3 rounded-xl bg-[var(--mw-surface-2)] flex items-center justify-between md:block gap-2">
             <div className="text-[var(--mw-text-muted)]">Sisa Dialokasikan</div>
             <div
-              className="text-base font-bold tab-num mt-0.5"
+              className="text-sm sm:text-base font-bold tab-num md:mt-0.5"
               style={{
                 color:
                   allocation.unallocated < 0

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -25,6 +25,7 @@ import { OnboardingWizard } from '@/components/OnboardingWizard';
 import { QuickInputSheet } from '@/components/QuickInputSheet';
 import { WalletLogo } from '@/components/WalletLogo';
 import { useWallet } from '@/context/WalletContext';
+import { buildPeriodOptions } from '@/lib/finance';
 import type { PeriodPreset } from '@/types/finance';
 
 const NAV_ITEMS = [
@@ -34,14 +35,6 @@ const NAV_ITEMS = [
   { href: '/budget', label: 'Budget', icon: PieChart },
   { href: '/goals', label: 'Goals', icon: Target },
   { href: '/settings', label: 'Settings', icon: Settings },
-];
-
-const PERIOD_OPTIONS: { value: PeriodPreset; label: string }[] = [
-  { value: 'this_month', label: 'Bulan ini' },
-  { value: 'last_month', label: 'Bulan lalu' },
-  { value: 'last_3_months', label: '3 Bulan' },
-  { value: 'this_year', label: 'Tahun ini' },
-  { value: 'all', label: 'Semua' },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -60,6 +53,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   } = useWallet();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const periodOptions = useMemo(() => (loading ? [] : buildPeriodOptions()), [loading]);
 
   if (loading) {
     return (
@@ -177,7 +171,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               onChange={(e) => setPeriod(e.target.value as PeriodPreset)}
               className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none focus:border-[var(--mw-primary)] cursor-pointer"
             >
-              {PERIOD_OPTIONS.map((opt) => (
+              {periodOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
                 </option>

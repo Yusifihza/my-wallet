@@ -12,12 +12,25 @@ export function OnboardingWizard() {
   const {
     dataset,
     updateOpeningBalances,
+    updateSubcategoryBudget,
     setDisplayName,
     completeOnboarding,
   } = useWallet();
 
   const [step, setStep] = useState<1 | 2>(1);
   const [name, setName] = useState(dataset.profile.displayName || 'Kamu');
+  const gajiSub = useMemo(
+    () =>
+      dataset.subcategories.find((s) => s.name === 'Gaji') ??
+      dataset.subcategories.find((s) => {
+        const c = dataset.categories.find((cat) => cat.id === s.categoryId);
+        return c?.type === 'income';
+      }),
+    [dataset.categories, dataset.subcategories]
+  );
+  const [incomeTargetInput, setIncomeTargetInput] = useState<string>(() =>
+    gajiSub?.monthlyBudget ? String(gajiSub.monthlyBudget) : '3600000'
+  );
   const [inputs, setInputs] = useState<Record<string, string>>(() => {
     const map: Record<string, string> = {};
     dataset.wallets
@@ -44,6 +57,13 @@ export function OnboardingWizard() {
     () => calculateZeroBasedAllocation(dataset.categories, dataset.subcategories),
     [dataset.categories, dataset.subcategories]
   );
+
+  const handleIncomeTargetChange = (raw: string) => {
+    setIncomeTargetInput(raw);
+    if (!gajiSub) return;
+    const val = parseAmountExpression(raw).value;
+    updateSubcategoryBudget(gajiSub.id, val > 0 ? val : null);
+  };
 
   const handleStep1Next = () => {
     if (name.trim()) setDisplayName(name.trim());
@@ -214,27 +234,66 @@ export function OnboardingWizard() {
                 Ringkasan struktur budget awalmu
               </h1>
               <p className="text-xs sm:text-sm text-[var(--mw-text-muted)]">
-                Seluruh kategori dari blueprint (termasuk plafon kategori &amp; siklus tanggal 1) sudah dimasukkan.
+                Sesuaikan target income bulananmu di bawah ini. Seluruh kategori &amp; sub-kategori juga bisa diedit di menu <b>Budget</b>.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="p-4 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)]">
-                <div className="text-xs text-[var(--mw-text-muted)]">Target Income (Gaji)</div>
-                <div className="text-lg font-bold tab-num mt-1" style={{ color: 'var(--mw-income)' }}>
+            {/* Editable Income Target */}
+            <div className="p-4 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)] space-y-1.5">
+              <label
+                htmlFor="onb-income-target"
+                className="text-xs font-semibold text-[var(--mw-text-muted)] block"
+              >
+                Atur Target Income Bulanan (Gaji)
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-[var(--mw-text-dim)]">Rp</span>
+                <input
+                  id="onb-income-target"
+                  type="text"
+                  value={incomeTargetInput}
+                  onChange={(e) => handleIncomeTargetChange(e.target.value)}
+                  placeholder="Mis. 5jt atau 4.500.000"
+                  className="w-full bg-transparent text-lg font-bold tab-num text-[var(--mw-income)] focus:outline-none"
+                />
+              </div>
+              <div className="text-xs text-[var(--mw-text-dim)]">
+                Boleh ketik singkat seperti <code className="font-mono text-[var(--mw-primary)]">5jt</code> atau <code className="font-mono text-[var(--mw-primary)]">4,5jt</code>
+              </div>
+            </div>
+
+            {/* 4 Allocation Cards — Vertical Stack on Mobile, 2x2 / 4 cols on Desktop */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5 text-xs">
+              <div className="p-3.5 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)] flex items-center justify-between md:block gap-2">
+                <div className="text-[var(--mw-text-muted)]">Target Income</div>
+                <div className="text-sm sm:text-base font-bold tab-num md:mt-1" style={{ color: 'var(--mw-income)' }}>
                   {formatIDR(allocation.incomeTarget)}
                 </div>
               </div>
-              <div className="p-4 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)]">
-                <div className="text-xs text-[var(--mw-text-muted)]">Budget Expense</div>
-                <div className="text-lg font-bold tab-num mt-1" style={{ color: 'var(--mw-expense)' }}>
+              <div className="p-3.5 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)] flex items-center justify-between md:block gap-2">
+                <div className="text-[var(--mw-text-muted)]">Budget Expense</div>
+                <div className="text-sm sm:text-base font-bold tab-num md:mt-1" style={{ color: 'var(--mw-expense)' }}>
                   {formatIDR(allocation.expenseBudget)}
                 </div>
               </div>
-              <div className="p-4 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)]">
-                <div className="text-xs text-[var(--mw-text-muted)]">Budget Saving</div>
-                <div className="text-lg font-bold tab-num mt-1" style={{ color: 'var(--mw-saving)' }}>
+              <div className="p-3.5 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)] flex items-center justify-between md:block gap-2">
+                <div className="text-[var(--mw-text-muted)]">Budget Saving</div>
+                <div className="text-sm sm:text-base font-bold tab-num md:mt-1" style={{ color: 'var(--mw-saving)' }}>
                   {formatIDR(allocation.savingBudget)}
+                </div>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)] flex items-center justify-between md:block gap-2">
+                <div className="text-[var(--mw-text-muted)]">Sisa Alokasi</div>
+                <div
+                  className="text-sm sm:text-base font-bold tab-num md:mt-1"
+                  style={{
+                    color:
+                      allocation.unallocated < 0
+                        ? 'var(--mw-expense)'
+                        : 'var(--mw-income)',
+                  }}
+                >
+                  {formatIDR(allocation.unallocated)}
                 </div>
               </div>
             </div>

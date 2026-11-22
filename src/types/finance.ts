@@ -23,6 +23,7 @@ export type ThemePreference = 'dark' | 'light' | 'system';
 export type PeriodPreset =
   | 'this_month'
   | 'last_month'
+  | `month:${string}`
   | 'last_3_months'
   | 'this_year'
   | 'all';

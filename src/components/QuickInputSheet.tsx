@@ -196,7 +196,12 @@ function QuickInputSheetInner() {
     return defaultInvestWalletId;
   });
   const [fee, setFee] = useState<number>(() => editTx?.fee ?? 0);
-  const [customFeeText, setCustomFeeText] = useState<string>('');
+  const [customFeeMode, setCustomFeeMode] = useState<boolean>(() =>
+    Boolean(editTx?.fee && ![0, 2500, 6500].includes(editTx.fee))
+  );
+  const [customFeeText, setCustomFeeText] = useState<string>(() =>
+    editTx?.fee && ![0, 2500, 6500].includes(editTx.fee) ? String(editTx.fee) : ''
+  );
   const [date, setDate] = useState<string>(() => editTx?.date ?? today);
   const [note, setNote] = useState<string>(() => editTx?.note ?? '');
   const [subModal, setSubModal] = useState<SubModal>(null);
@@ -1201,42 +1206,74 @@ function QuickInputSheetInner() {
             </button>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[var(--mw-border)] text-xs">
-            <span className="text-[var(--mw-text-muted)]">Biaya admin:</span>
-            <div className="flex items-center gap-1">
-              {[0, 2500, 6500].map((f) => (
+          <div className="space-y-2 pt-2 border-t border-[var(--mw-border)] text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[var(--mw-text-muted)]">Biaya admin:</span>
+              <div className="flex flex-wrap items-center gap-1">
+                {[0, 2500, 6500].map((f) => {
+                  const active = !customFeeMode && fee === f;
+                  return (
+                    <button
+                      key={f}
+                      type="button"
+                      onClick={() => {
+                        setCustomFeeMode(false);
+                        setFee(f);
+                        setCustomFeeText('');
+                      }}
+                      className="px-2.5 py-1 rounded-lg border cursor-pointer tab-num"
+                      style={{
+                        background: active ? 'var(--mw-primary-soft)' : 'var(--mw-surface)',
+                        borderColor: active ? 'var(--mw-primary)' : 'var(--mw-border)',
+                        color: active ? 'var(--mw-primary)' : 'var(--mw-text-muted)',
+                      }}
+                    >
+                      {f === 0 ? 'Gratis' : formatIDR(f)}
+                    </button>
+                  );
+                })}
                 <button
-                  key={f}
                   type="button"
                   onClick={() => {
-                    setFee(f);
-                    setCustomFeeText('');
+                    setCustomFeeMode(true);
+                    if (!customFeeText && fee > 0) setCustomFeeText(String(fee));
                   }}
-                  className="px-2 py-1 rounded-lg border cursor-pointer tab-num"
+                  className="px-2.5 py-1 rounded-lg border cursor-pointer font-medium"
                   style={{
-                    background:
-                      fee === f && !customFeeText ? 'var(--mw-primary-soft)' : 'var(--mw-surface)',
-                    borderColor:
-                      fee === f && !customFeeText ? 'var(--mw-primary)' : 'var(--mw-border)',
-                    color:
-                      fee === f && !customFeeText ? 'var(--mw-primary)' : 'var(--mw-text-muted)',
+                    background: customFeeMode ? 'var(--mw-primary-soft)' : 'var(--mw-surface)',
+                    borderColor: customFeeMode ? 'var(--mw-primary)' : 'var(--mw-border)',
+                    color: customFeeMode ? 'var(--mw-primary)' : 'var(--mw-text-muted)',
                   }}
                 >
-                  {f === 0 ? 'Gratis' : formatIDR(f)}
+                  Custom
                 </button>
-              ))}
-              <input
-                type="text"
-                inputMode="numeric"
-                value={customFeeText}
-                onChange={(e) => {
-                  setCustomFeeText(e.target.value);
-                  setFee(parseAmountExpression(e.target.value).value);
-                }}
-                placeholder="Lain"
-                className="w-14 px-2 py-1 rounded-lg bg-[var(--mw-surface)] border border-[var(--mw-border)] text-xs text-[var(--mw-text)] focus:outline-none focus:border-[var(--mw-primary)]"
-              />
+              </div>
             </div>
+
+            {customFeeMode && (
+              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[var(--mw-surface)] border border-[var(--mw-primary)]">
+                <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                  <span className="text-[var(--mw-text-dim)] font-semibold">Rp</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    autoFocus
+                    value={customFeeText}
+                    onChange={(e) => {
+                      setCustomFeeText(e.target.value);
+                      setFee(parseAmountExpression(e.target.value).value);
+                    }}
+                    placeholder="Ketik nominal (mis. 1500 atau 4rb)"
+                    className="w-full bg-transparent text-xs font-semibold tab-num text-[var(--mw-text)] focus:outline-none"
+                  />
+                </div>
+                {fee > 0 && (
+                  <span className="text-xs font-bold tab-num text-[var(--mw-primary)] shrink-0">
+                    = {formatIDR(fee)}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5 text-xs text-[var(--mw-text-muted)]">

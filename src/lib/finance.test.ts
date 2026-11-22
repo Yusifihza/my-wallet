@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildPeriodOptions,
   calculateCategoryBudgets,
   calculateGoalProgress,
   calculateNetWorth,
@@ -7,6 +8,7 @@ import {
   calculateWalletBalances,
   calculateZeroBasedAllocation,
   formatIDR,
+  getPeriodRange,
   parseAmountExpression,
 } from '@/lib/finance';
 import { createSeedCategories, createSeedGoals, createSeedWallets } from '@/lib/seed';
@@ -224,3 +226,46 @@ describe('Goal Progress & IDR Formatting', () => {
     expect(formatIDR(3600000, true)).toBe('Rp•••••');
   });
 });
+
+describe('6-Month Rolling Period Selector & Income Budgets', () => {
+  it('generates monthly options up to 6 months back plus aggregates and all', () => {
+    const ref = new Date(2026, 10, 21); // Nov 21, 2026
+    const opts = buildPeriodOptions(ref);
+    expect(opts[0].value).toBe('this_month');
+    expect(opts[1].value).toBe('last_month');
+    expect(opts[2].value).toBe('month:2026-09');
+    expect(opts[6].value).toBe('month:2026-05');
+    expect(opts[opts.length - 1].value).toBe('all');
+
+    const range = getPeriodRange('month:2026-05', ref);
+    expect(range.start).toBe('2026-05-01');
+    expect(range.end).toBe('2026-05-31');
+    expect(range.label).toBe('Mei 2026');
+  });
+
+  it('calculates income budget progress positively when target is reached', () => {
+    const { categories, subcategories } = createSeedCategories();
+    const txs: Transaction[] = [
+      {
+        id: 'inc1',
+        date: '2026-11-01',
+        type: 'income',
+        subcategoryId: 'sub_inc_gaji',
+        walletId: 'w_jago',
+        toWalletId: null,
+        amount: 3600000,
+        fee: 0,
+        goalId: null,
+        note: 'Gaji',
+        createdAt: '2026-11-01T09:00:00Z',
+      },
+    ];
+    const res = calculateCategoryBudgets(categories, subcategories, txs, 'income');
+    const pemasukan = res.items.find((i) => i.category.id === 'cat_inc_pemasukan')!;
+    expect(pemasukan.effectiveBudget).toBe(3600000);
+    expect(pemasukan.actual).toBe(3600000);
+    expect(pemasukan.pct).toBe(100);
+    expect(pemasukan.status).toBe('safe');
+  });
+});
+
