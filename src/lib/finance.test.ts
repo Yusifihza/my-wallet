@@ -21,6 +21,7 @@ import {
   createSeedGoals,
   createSeedWallets,
 } from '@/lib/seed';
+import { normalizeSupabaseKey, normalizeSupabaseUrl } from '@/lib/supabase/client';
 import type { Transaction, WalletValuation } from '@/types/finance';
 
 describe('parseAmountExpression', () => {
@@ -384,6 +385,20 @@ describe('Phase 2 & 3: Bibit Multi-Product, Shared Wedding Goal, Dummy Data, Ana
     expect(bibitAns.topic).toBe('bibit');
     expect(bibitAns.answer).toContain('Pasar Uang');
     expect(bibitAns.answer).toContain('SBN');
+  });
+
+  it('normalizes Supabase URLs copied from Data API (/rest/v1) and trims API keys', () => {
+    expect(normalizeSupabaseUrl('https://abcdef123456.supabase.co/rest/v1')).toBe(
+      'https://abcdef123456.supabase.co'
+    );
+    expect(normalizeSupabaseUrl('  https://abcdef123456.supabase.co/auth/v1/callback  ')).toBe(
+      'https://abcdef123456.supabase.co'
+    );
+    expect(normalizeSupabaseUrl('abcdef123456.supabase.co/rest/v1/')).toBe(
+      'https://abcdef123456.supabase.co'
+    );
+    expect(normalizeSupabaseUrl('')).toBeNull();
+    expect(normalizeSupabaseKey('  sb_publishable_xyz  ')).toBe('sb_publishable_xyz');
   });
 });
 

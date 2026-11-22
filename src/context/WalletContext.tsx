@@ -102,7 +102,7 @@ interface WalletContextValue {
   toast: ToastMessage | null;
   dismissToast: () => void;
   // Auth
-  signInWithGoogle: () => Promise<void>;
+  signInWithGoogle: () => Promise<AuthActionResult>;
   signInWithEmail: (email: string, password: string) => Promise<AuthActionResult>;
   signUpWithEmail: (
     email: string,
@@ -225,22 +225,27 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       const now = new Date();
       const supabase = getSupabaseBrowserClient();
       if (supabase) {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (session?.user) {
-          const loaded = await loadSupabaseDataset(supabase, session.user.id, {
-            name: session.user.user_metadata?.full_name || session.user.user_metadata?.name,
-            email: session.user.email,
-            avatarUrl: session.user.user_metadata?.avatar_url,
-          });
-          if (!active) return;
-          setClientNow(now);
-          setCloudUserId(session.user.id);
-          setDataset(loaded);
-          setAuthMode('supabase');
-          setLoading(false);
-          return;
+        try {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          if (session?.user) {
+            setLocalModeOptIn(false);
+            const loaded = await loadSupabaseDataset(supabase, session.user.id, {
+              name: session.user.user_metadata?.full_name || session.user.user_metadata?.name,
+              email: session.user.email,
+              avatarUrl: session.user.user_metadata?.avatar_url,
+            });
+            if (!active) return;
+            setClientNow(now);
+            setCloudUserId(session.user.id);
+            setDataset(loaded);
+            setAuthMode('supabase');
+            setLoading(false);
+            return;
+          }
+        } catch {
+          // Fall through to auth/local screen if session check or initial load fails
         }
       }
 
@@ -296,15 +301,17 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   // ==================== AUTH ACTIONS ====================
 
-  const signInWithGoogle = useCallback(async () => {
+  const signInWithGoogle = useCallback(async (): Promise<AuthActionResult> => {
     const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
-    await supabase.auth.signInWithOAuth({
+    if (!supabase) return { error: 'Supabase belum terhubung.' };
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
       },
     });
+    if (error) return { error: error.message };
+    return {};
   }, []);
 
   const signInWithEmail = useCallback(

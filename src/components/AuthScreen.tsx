@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowRight,
   CheckCircle2,
@@ -28,8 +28,22 @@ export function AuthScreen() {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [busy, setBusy] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('auth_error');
+  });
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('auth_error')) {
+      params.delete('auth_error');
+      const nextUrl = params.toString()
+        ? `${window.location.pathname}?${params.toString()}`
+        : window.location.pathname;
+      window.history.replaceState({}, '', nextUrl);
+    }
+  }, []);
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,6 +57,18 @@ export function AuthScreen() {
           : await signUpWithEmail(email, password, displayName);
       if (res.error) setErrorMsg(res.error);
       if (res.message) setInfoMsg(res.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setErrorMsg(null);
+    setInfoMsg(null);
+    setBusy(true);
+    try {
+      const res = await signInWithGoogle();
+      if (res?.error) setErrorMsg(res.error);
     } finally {
       setBusy(false);
     }
@@ -180,8 +206,9 @@ export function AuthScreen() {
 
             <button
               type="button"
-              onClick={signInWithGoogle}
-              className="w-full py-3 px-4 rounded-2xl font-semibold text-sm bg-[var(--mw-surface-2)] hover:bg-[var(--mw-surface-3)] border border-[var(--mw-border)] text-[var(--mw-text)] flex items-center justify-center gap-2.5 transition cursor-pointer"
+              disabled={busy}
+              onClick={handleGoogleSignIn}
+              className="w-full py-3 px-4 rounded-2xl font-semibold text-sm bg-[var(--mw-surface-2)] hover:bg-[var(--mw-surface-3)] border border-[var(--mw-border)] text-[var(--mw-text)] flex items-center justify-center gap-2.5 transition cursor-pointer disabled:opacity-60"
             >
               <span>Masuk dengan Google</span>
               <ArrowRight className="w-4 h-4 text-[var(--mw-primary)]" />
