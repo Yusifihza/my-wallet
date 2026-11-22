@@ -95,6 +95,13 @@ interface WalletContextValue {
   updateWallet: (wallet: Wallet) => void;
   addWallet: (wallet: Omit<Wallet, 'id' | 'sortOrder'>) => void;
   updateOpeningBalances: (balances: Record<string, number>) => void;
+  addCategory: (
+    type: Category['type'],
+    name: string,
+    budgetCap: number | null,
+    icon?: string,
+    color?: string
+  ) => void;
   updateCategoryCap: (categoryId: string, cap: number | null) => void;
   updateSubcategoryBudget: (subcategoryId: string, budget: number | null) => void;
   addSubcategory: (categoryId: string, name: string, monthlyBudget: number | null, aliases?: string[]) => void;
@@ -457,6 +464,81 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     [authMode, cloudUserId, commitDataset]
   );
 
+  const addCategory = useCallback(
+    (
+      type: Category['type'],
+      name: string,
+      budgetCap: number | null,
+      icon = 'tag',
+      color = '#10b981'
+    ) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const catId = generateUUID();
+      const cat: Category = {
+        id: catId,
+        type,
+        name: trimmed,
+        budgetCap,
+        icon,
+        color,
+        archived: false,
+        sortOrder: dataset.categories.filter((c) => c.type === type).length + 1,
+      };
+      const defaultSub: Subcategory = {
+        id: generateUUID(),
+        categoryId: catId,
+        name: 'Umum',
+        monthlyBudget: null,
+        aliases: [],
+        defaultNotes: [],
+        archived: false,
+        sortOrder: 1,
+      };
+      commitDataset((prev) => ({
+        ...prev,
+        categories: [...prev.categories, cat],
+        subcategories: [...prev.subcategories, defaultSub],
+      }));
+      if (authMode === 'supabase' && cloudUserId) {
+        const supabase = getSupabaseBrowserClient();
+        if (supabase) {
+          supabase
+            .from('categories')
+            .insert({
+              id: cat.id,
+              owner_id: cloudUserId,
+              type: cat.type,
+              name: cat.name,
+              budget_cap: cat.budgetCap,
+              icon: cat.icon,
+              color: cat.color,
+              archived: false,
+              sort_order: cat.sortOrder,
+            })
+            .then(() => {
+              supabase
+                .from('subcategories')
+                .insert({
+                  id: defaultSub.id,
+                  owner_id: cloudUserId,
+                  category_id: cat.id,
+                  name: defaultSub.name,
+                  monthly_budget: null,
+                  aliases: [],
+                  default_notes: [],
+                  archived: false,
+                  sort_order: 1,
+                })
+                .then(() => {});
+            });
+        }
+      }
+      showToast(`Kategori "${trimmed}" ditambahkan`);
+    },
+    [authMode, cloudUserId, commitDataset, dataset.categories, showToast]
+  );
+
   const updateCategoryCap = useCallback(
     (categoryId: string, cap: number | null) => {
       commitDataset((prev) => ({
@@ -727,6 +809,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     updateWallet,
     addWallet,
     updateOpeningBalances,
+    addCategory,
     updateCategoryCap,
     updateSubcategoryBudget,
     addSubcategory,

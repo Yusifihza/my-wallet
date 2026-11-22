@@ -228,14 +228,39 @@ describe('Goal Progress & IDR Formatting', () => {
 });
 
 describe('6-Month Rolling Period Selector & Income Budgets', () => {
-  it('generates monthly options up to 6 months back plus aggregates and all', () => {
+  it('only includes past months (up to 6 months back) that have transactions', () => {
     const ref = new Date(2026, 10, 21); // Nov 21, 2026
-    const opts = buildPeriodOptions(ref);
-    expect(opts[0].value).toBe('this_month');
-    expect(opts[1].value).toBe('last_month');
-    expect(opts[2].value).toBe('month:2026-09');
-    expect(opts[6].value).toBe('month:2026-05');
-    expect(opts[opts.length - 1].value).toBe('all');
+
+    // Empty transactions -> only current month and all time
+    const emptyOpts = buildPeriodOptions([], ref);
+    expect(emptyOpts.map((o) => o.value)).toEqual(['this_month', 'all']);
+
+    // Transactions in Oct 2026, Jul 2026, May 2026, and Jan 2026 (>6 months back)
+    const sampleTxs: Transaction[] = ['2026-10-12', '2026-07-04', '2026-05-19', '2026-01-10'].map(
+      (date, i) => ({
+        id: `p${i}`,
+        date,
+        type: 'expense',
+        subcategoryId: 'sub_exp_kafe',
+        walletId: 'w_gopay',
+        toWalletId: null,
+        amount: 25000,
+        fee: 0,
+        goalId: null,
+        note: '',
+        createdAt: `${date}T09:00:00Z`,
+      })
+    );
+
+    const opts = buildPeriodOptions(sampleTxs, ref);
+    expect(opts.map((o) => o.value)).toEqual([
+      'this_month',
+      'last_month',
+      'month:2026-07',
+      'month:2026-05',
+      'this_year',
+      'all',
+    ]);
 
     const range = getPeriodRange('month:2026-05', ref);
     expect(range.start).toBe('2026-05-01');

@@ -291,34 +291,67 @@ export interface PeriodOption {
 }
 
 /**
- * Generates period dropdown options: current month, previous month,
- * monthly steps up to 6 months back, 3-month aggregate, current year, and all time.
+ * Generates period dropdown options dynamically from available transaction data:
+ * - Always includes current month ("Bulan ini")
+ * - Includes past months (1..6 months back) ONLY when at least one transaction exists in that month
+ * - Includes "3 Bulan Terakhir" and "Tahun YYYY" when transactions span multiple months
+ * - Always includes "Semua Waktu"
  */
-export function buildPeriodOptions(referenceDate = new Date()): PeriodOption[] {
+export function buildPeriodOptions(
+  transactions: Transaction[] = [],
+  referenceDate = new Date()
+): PeriodOption[] {
   const y = referenceDate.getFullYear();
   const m = referenceDate.getMonth();
-  const options: PeriodOption[] = [];
+  const currentYm = `${y}-${String(m + 1).padStart(2, '0')}`;
 
-  for (let offset = 0; offset <= 6; offset++) {
-    const d = new Date(y, m - offset, 1);
-    const yr = d.getFullYear();
-    const mo = d.getMonth();
-    const shortLabel = `${MONTHS_SHORT[mo]} ${yr}`;
-    if (offset === 0) {
-      options.push({ value: 'this_month', label: `Bulan ini (${shortLabel})` });
-    } else if (offset === 1) {
-      options.push({ value: 'last_month', label: `Bulan lalu (${shortLabel})` });
-    } else {
-      const ym = `${yr}-${String(mo + 1).padStart(2, '0')}`;
-      options.push({ value: `month:${ym}`, label: `${MONTHS_LONG[mo]} ${yr}` });
+  const txMonths = new Set<string>();
+  for (const tx of transactions) {
+    if (tx.date && tx.date.length >= 7) {
+      txMonths.add(tx.date.slice(0, 7));
     }
   }
 
-  options.push(
-    { value: 'last_3_months', label: '3 Bulan Terakhir' },
-    { value: 'this_year', label: `Tahun ${y}` },
-    { value: 'all', label: 'Semua Waktu' }
-  );
+  const options: PeriodOption[] = [
+    { value: 'this_month', label: `Bulan ini (${MONTHS_SHORT[m]} ${y})` },
+  ];
+
+  let pastMonthsWithin6 = 0;
+  let monthsWithin3 = txMonths.has(currentYm) ? 1 : 0;
+
+  for (let offset = 1; offset <= 6; offset++) {
+    const d = new Date(y, m - offset, 1);
+    const yr = d.getFullYear();
+    const mo = d.getMonth();
+    const ym = `${yr}-${String(mo + 1).padStart(2, '0')}`;
+    if (!txMonths.has(ym)) continue;
+
+    pastMonthsWithin6++;
+    if (offset <= 2) monthsWithin3++;
+
+    if (offset === 1) {
+      options.push({
+        value: 'last_month',
+        label: `Bulan lalu (${MONTHS_SHORT[mo]} ${yr})`,
+      });
+    } else {
+      options.push({
+        value: `month:${ym}`,
+        label: `${MONTHS_LONG[mo]} ${yr}`,
+      });
+    }
+  }
+
+  if (monthsWithin3 >= 2) {
+    options.push({ value: 'last_3_months', label: '3 Bulan Terakhir' });
+  }
+
+  const monthsInCurrentYear = [...txMonths].filter((ym) => ym.startsWith(`${y}-`)).length;
+  if (monthsInCurrentYear >= 2 || pastMonthsWithin6 >= 2) {
+    options.push({ value: 'this_year', label: `Tahun ${y}` });
+  }
+
+  options.push({ value: 'all', label: 'Semua Waktu' });
 
   return options;
 }

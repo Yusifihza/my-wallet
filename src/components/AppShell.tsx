@@ -53,7 +53,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   } = useWallet();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const periodOptions = useMemo(() => (loading ? [] : buildPeriodOptions()), [loading]);
+  const periodOptions = useMemo(
+    () => (loading ? [] : buildPeriodOptions(dataset.transactions)),
+    [dataset.transactions, loading]
+  );
+  const safePeriod = periodOptions.some((o) => o.value === period) ? period : 'this_month';
 
   if (loading) {
     return (
@@ -167,7 +171,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </label>
             <select
               id="global-period"
-              value={period}
+              value={safePeriod}
               onChange={(e) => setPeriod(e.target.value as PeriodPreset)}
               className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none focus:border-[var(--mw-primary)] cursor-pointer"
             >

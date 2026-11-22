@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Calendar, Plus, Trash2, Users, X } from 'lucide-react';
+import { Calendar, Pencil, Plus, Trash2, Users, X } from 'lucide-react';
 import { DynamicIcon } from '@/components/IconMap';
 import { useWallet } from '@/context/WalletContext';
 import {
@@ -10,40 +10,71 @@ import {
   formatIDR,
   parseAmountExpression,
 } from '@/lib/finance';
+import type { Goal } from '@/types/finance';
 
 export function GoalsView() {
-  const { dataset, openQuickInput, addGoal, deleteGoal } = useWallet();
+  const { dataset, openQuickInput, addGoal, updateGoal, deleteGoal } = useWallet();
   const privacy = dataset.profile.privacyMode;
 
-  const [showAdd, setShowAdd] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
   const [name, setName] = useState('');
   const [targetStr, setTargetStr] = useState('');
   const [deadline, setDeadline] = useState('');
   const [isShared, setIsShared] = useState(false);
   const [icon, setIcon] = useState('target');
 
-  const handleCreate = (e: React.FormEvent) => {
-    e.preventDefault();
-    const targetAmount = parseAmountExpression(targetStr).value;
-    if (!name.trim() || targetAmount <= 0) return;
-
-    addGoal({
-      name: name.trim(),
-      icon,
-      targetAmount,
-      deadline: deadline || null,
-      walletId: dataset.wallets.find((w) => w.group === 'investment')?.id ?? null,
-      subcategoryId:
-        dataset.subcategories.find((s) => s.name === 'Umum' && s.categoryId === 'cat_sav_tabungan')
-          ?.id ?? null,
-      color: isShared ? '#10b981' : '#38bdf8',
-      isShared,
-    });
+  const openCreateModal = () => {
+    setEditingGoal(null);
     setName('');
     setTargetStr('');
     setDeadline('');
     setIsShared(false);
-    setShowAdd(false);
+    setIcon('target');
+    setModalOpen(true);
+  };
+
+  const openEditModal = (goal: Goal) => {
+    setEditingGoal(goal);
+    setName(goal.name);
+    setTargetStr(String(goal.targetAmount));
+    setDeadline(goal.deadline ?? '');
+    setIsShared(goal.isShared);
+    setIcon(goal.icon);
+    setModalOpen(true);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetAmount = parseAmountExpression(targetStr).value;
+    if (!name.trim() || targetAmount <= 0) return;
+
+    if (editingGoal) {
+      updateGoal({
+        ...editingGoal,
+        name: name.trim(),
+        icon,
+        targetAmount,
+        deadline: deadline || null,
+        color: isShared ? '#10b981' : '#38bdf8',
+        isShared,
+      });
+    } else {
+      addGoal({
+        name: name.trim(),
+        icon,
+        targetAmount,
+        deadline: deadline || null,
+        walletId: dataset.wallets.find((w) => w.group === 'investment')?.id ?? null,
+        subcategoryId:
+          dataset.subcategories.find((s) => s.name === 'Umum' && s.categoryId === 'cat_sav_tabungan')
+            ?.id ?? null,
+        color: isShared ? '#10b981' : '#38bdf8',
+        isShared,
+      });
+    }
+    setModalOpen(false);
+    setEditingGoal(null);
   };
 
   return (
@@ -54,13 +85,13 @@ export function GoalsView() {
             Target Tabungan (Goals)
           </h1>
           <p className="text-xs text-[var(--mw-text-muted)]">
-            Pantau progress target tabungan pribadi maupun bersama pasangan
+            Pantau &amp; sesuaikan target tabungan pribadi maupun bersama pasangan
           </p>
         </div>
 
         <button
           type="button"
-          onClick={() => setShowAdd(true)}
+          onClick={openCreateModal}
           className="px-4 py-2.5 rounded-xl text-xs font-semibold text-white inline-flex items-center gap-1.5 cursor-pointer"
           style={{ background: 'var(--mw-primary)' }}
         >
@@ -104,15 +135,25 @@ export function GoalsView() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="text-lg font-extrabold tab-num" style={{ color: g.color }}>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-lg font-extrabold tab-num mr-1" style={{ color: g.color }}>
                       {prog.pct}%
                     </span>
                     <button
                       type="button"
+                      onClick={() => openEditModal(g)}
+                      aria-label={`Edit goal ${g.name}`}
+                      title="Edit target"
+                      className="p-1.5 rounded-lg bg-[var(--mw-surface-2)] text-[var(--mw-text-muted)] hover:text-[var(--mw-text)] cursor-pointer"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => deleteGoal(g.id)}
                       aria-label={`Hapus goal ${g.name}`}
-                      className="p-1.5 rounded-lg text-[var(--mw-text-dim)] hover:text-red-400 cursor-pointer"
+                      title="Hapus target"
+                      className="p-1.5 rounded-lg bg-[var(--mw-surface-2)] text-[var(--mw-text-dim)] hover:text-red-400 cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -170,21 +211,23 @@ export function GoalsView() {
         })}
       </div>
 
-      {/* Add Goal Modal */}
-      {showAdd && (
+      {/* Create / Edit Goal Modal */}
+      {modalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'var(--mw-backdrop)' }}
         >
           <form
-            onSubmit={handleCreate}
+            onSubmit={handleSubmit}
             className="w-full max-w-md mw-card rounded-3xl p-5 space-y-4 animate-sheet-up"
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-[var(--mw-text)]">Tambah Target Tabungan</h2>
+              <h2 className="text-base font-bold text-[var(--mw-text)]">
+                {editingGoal ? `Edit Target: ${editingGoal.name}` : 'Tambah Target Tabungan'}
+              </h2>
               <button
                 type="button"
-                onClick={() => setShowAdd(false)}
+                onClick={() => setModalOpen(false)}
                 className="p-1.5 rounded-lg bg-[var(--mw-surface-2)] text-[var(--mw-text-muted)] cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -197,6 +240,7 @@ export function GoalsView() {
                 <input
                   type="text"
                   required
+                  autoFocus
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Mis. HP Baru, Sepatu Lari, Liburan Bali"
@@ -211,7 +255,7 @@ export function GoalsView() {
                   required
                   value={targetStr}
                   onChange={(e) => setTargetStr(e.target.value)}
-                  placeholder="Mis. 5jt atau 1,5jt"
+                  placeholder="Mis. 5jt atau 50jt"
                   className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none focus:border-[var(--mw-primary)]"
                 />
               </div>
@@ -267,7 +311,7 @@ export function GoalsView() {
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setShowAdd(false)}
+                onClick={() => setModalOpen(false)}
                 className="px-4 py-2.5 rounded-xl text-xs font-medium bg-[var(--mw-surface-2)] text-[var(--mw-text)] cursor-pointer"
               >
                 Batal
@@ -277,7 +321,7 @@ export function GoalsView() {
                 className="px-5 py-2.5 rounded-xl text-xs font-semibold text-white cursor-pointer"
                 style={{ background: 'var(--mw-primary)' }}
               >
-                Buat Target
+                {editingGoal ? 'Simpan Perubahan' : 'Buat Target'}
               </button>
             </div>
           </form>

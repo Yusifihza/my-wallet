@@ -32,6 +32,7 @@ export function SettingsView() {
   } = useWallet();
 
   const [nameInput, setNameInput] = useState(dataset.profile.displayName);
+  const [confirmReset, setConfirmReset] = useState(false);
   const [catId, setCatId] = useState(dataset.categories.find((c) => c.type === 'expense')?.id ?? '');
   const [subName, setSubName] = useState('');
   const [subBudget, setSubBudget] = useState('');
@@ -282,15 +283,36 @@ export function SettingsView() {
             Atur Ulang Saldo Awal
           </button>
 
-          {authMode === 'local' && (
-            <button
-              type="button"
-              onClick={resetLocalData}
-              className="px-3.5 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 font-medium cursor-pointer"
-            >
-              Reset Data Lokal
-            </button>
-          )}
+          {authMode === 'local' &&
+            (confirmReset ? (
+              <div className="inline-flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmReset(false);
+                    resetLocalData();
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-red-600 text-white font-semibold cursor-pointer"
+                >
+                  Ya, Reset Semua
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmReset(false)}
+                  className="px-3 py-2 rounded-xl bg-[var(--mw-surface-2)] text-[var(--mw-text-muted)] cursor-pointer"
+                >
+                  Batal
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmReset(true)}
+                className="px-3.5 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 font-medium cursor-pointer"
+              >
+                Reset Data Lokal
+              </button>
+            ))}
 
           <button
             type="button"
