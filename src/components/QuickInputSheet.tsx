@@ -1279,8 +1279,7 @@ function QuickInputSheetInner() {
           <div className="flex items-center gap-1.5 text-xs text-[var(--mw-text-muted)]">
             <Info className="w-3.5 h-3.5 shrink-0 text-[var(--mw-primary)]" />
             <span>
-              Transfer tidak masuk Expense
-              {fee > 0 ? ` · Biaya ${formatIDR(fee)} dicatat ke Lainnya › Biaya` : ''}
+              Biaya admin{fee > 0 ? ` (${formatIDR(fee)})` : ''} masuk ke Expense: Lainnya &gt; Biaya
             </span>
           </div>
         </div>

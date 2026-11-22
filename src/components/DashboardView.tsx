@@ -233,7 +233,7 @@ export function DashboardView() {
                 {formatIDR(periodSummary.expense, privacy)}
               </div>
               <div className="text-xs text-[var(--mw-text-dim)] mt-0.5">
-                Transfer dikecualikan
+                {periodLabel}
               </div>
             </div>
           </div>

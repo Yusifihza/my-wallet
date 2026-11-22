@@ -29,7 +29,7 @@ export function OnboardingWizard() {
     [dataset.categories, dataset.subcategories]
   );
   const [incomeTargetInput, setIncomeTargetInput] = useState<string>(() =>
-    gajiSub?.monthlyBudget ? String(gajiSub.monthlyBudget) : '3600000'
+    gajiSub?.monthlyBudget ? String(gajiSub.monthlyBudget) : '6000000'
   );
   const [inputs, setInputs] = useState<Record<string, string>>(() => {
     const map: Record<string, string> = {};

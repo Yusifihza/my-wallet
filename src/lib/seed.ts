@@ -247,7 +247,7 @@ const RAW_CATEGORIES: RawCategorySeed[] = [
     icon: 'wallet',
     color: '#10b981',
     subs: [
-      { id: 'sub_inc_gaji', name: 'Gaji', monthlyBudget: 3600000, aliases: ['salary', 'gajian'], defaultNotes: ['Gaji bulanan'] },
+      { id: 'sub_inc_gaji', name: 'Gaji', monthlyBudget: 6000000, aliases: ['salary', 'gajian'], defaultNotes: ['Gaji bulanan'] },
       { id: 'sub_inc_bonus', name: 'Bonus', monthlyBudget: null, aliases: ['thr', 'insentif'], defaultNotes: ['Bonus kerja'] },
       { id: 'sub_inc_tambahan', name: 'Pendapatan tambahan', monthlyBudget: null, aliases: ['freelance', 'side job', 'proyek'], defaultNotes: ['Freelance'] },
       { id: 'sub_inc_tunjangan', name: 'Tunjangan/Uang saku', monthlyBudget: null, aliases: ['reimburse', 'uang makan'], defaultNotes: ['Tunjangan'] },

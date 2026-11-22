@@ -160,14 +160,14 @@ describe('calculateWalletBalances & Net Worth (Blueprint §2)', () => {
 });
 
 describe('Budget Interpretasi B & Zero-Based Seed Audit', () => {
-  it('matches Blueprint §3.1 exact seed numbers (Income 3.6jt, Expense 3.425jt, Saving 1.1jt, Deficit -925rb)', () => {
+  it('matches finalized seed numbers (Income 6jt, Expense 3.425jt, Saving 1.1jt, Surplus +1.475jt)', () => {
     const { categories, subcategories } = createSeedCategories();
     const alloc = calculateZeroBasedAllocation(categories, subcategories);
 
-    expect(alloc.incomeTarget).toBe(3600000);
+    expect(alloc.incomeTarget).toBe(6000000);
     expect(alloc.expenseBudget).toBe(3425000);
     expect(alloc.savingBudget).toBe(1100000);
-    expect(alloc.unallocated).toBe(-925000);
+    expect(alloc.unallocated).toBe(1475000);
   });
 
   it('flags sub-category budget sum exceeding parent cap', () => {
@@ -278,7 +278,7 @@ describe('6-Month Rolling Period Selector & Income Budgets', () => {
         subcategoryId: 'sub_inc_gaji',
         walletId: 'w_jago',
         toWalletId: null,
-        amount: 3600000,
+        amount: 6000000,
         fee: 0,
         goalId: null,
         note: 'Gaji',
@@ -287,8 +287,8 @@ describe('6-Month Rolling Period Selector & Income Budgets', () => {
     ];
     const res = calculateCategoryBudgets(categories, subcategories, txs, 'income');
     const pemasukan = res.items.find((i) => i.category.id === 'cat_inc_pemasukan')!;
-    expect(pemasukan.effectiveBudget).toBe(3600000);
-    expect(pemasukan.actual).toBe(3600000);
+    expect(pemasukan.effectiveBudget).toBe(6000000);
+    expect(pemasukan.actual).toBe(6000000);
     expect(pemasukan.pct).toBe(100);
     expect(pemasukan.status).toBe('safe');
   });
