@@ -1,16 +1,18 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, Sparkles } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, Plus, Sparkles, X } from 'lucide-react';
 import { DynamicIcon } from '@/components/IconMap';
 import { WalletLogo } from '@/components/WalletLogo';
 import { useWallet } from '@/context/WalletContext';
 import { calculateZeroBasedAllocation, formatIDR, parseAmountExpression } from '@/lib/finance';
-import { WALLET_GROUP_LABELS, WALLET_GROUP_ORDER } from '@/lib/seed';
+import { todayISO, WALLET_GROUP_LABELS, WALLET_GROUP_ORDER } from '@/lib/seed';
+import type { Wallet, WalletGroup } from '@/types/finance';
 
 export function OnboardingWizard() {
   const {
     dataset,
+    addWallet,
     updateOpeningBalances,
     updateSubcategoryBudget,
     setDisplayName,
@@ -19,6 +21,11 @@ export function OnboardingWizard() {
 
   const [step, setStep] = useState<1 | 2>(1);
   const [name, setName] = useState(dataset.profile.displayName || 'Kamu');
+  const [showAddWallet, setShowAddWallet] = useState(false);
+  const [newWalletName, setNewWalletName] = useState('');
+  const [newWalletGroup, setNewWalletGroup] = useState<WalletGroup>('bank');
+  const [newWalletOpening, setNewWalletOpening] = useState('');
+
   const gajiSub = useMemo(
     () =>
       dataset.subcategories.find((s) => s.name === 'Gaji') ??
@@ -46,9 +53,22 @@ export function OnboardingWizard() {
     [dataset.wallets]
   );
 
+  const getWalletInputValue = (w: Wallet) =>
+    inputs[w.id] !== undefined
+      ? inputs[w.id]
+      : w.openingBalance > 0
+        ? String(w.openingBalance)
+        : '';
+
   const totalOpening = useMemo(() => {
     return activeWallets.reduce((sum, w) => {
-      const parsed = parseAmountExpression(inputs[w.id] ?? '');
+      const raw =
+        inputs[w.id] !== undefined
+          ? inputs[w.id]
+          : w.openingBalance > 0
+            ? String(w.openingBalance)
+            : '';
+      const parsed = parseAmountExpression(raw);
       return sum + parsed.value;
     }, 0);
   }, [activeWallets, inputs]);
@@ -65,18 +85,55 @@ export function OnboardingWizard() {
     updateSubcategoryBudget(gajiSub.id, val > 0 ? val : null);
   };
 
+  const handleAddWallet = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newWalletName.trim()) return;
+    const iconByGroup: Record<WalletGroup, string> = {
+      cash: 'banknote',
+      bank: 'landmark',
+      ewallet: 'smartphone',
+      emoney: 'credit-card',
+      investment: 'trending-up',
+      credit: 'credit-card',
+    };
+    const colorByGroup: Record<WalletGroup, string> = {
+      cash: '#10b981',
+      bank: '#0284c7',
+      ewallet: '#06b6d4',
+      emoney: '#2563eb',
+      investment: '#10b981',
+      credit: '#64748b',
+    };
+    addWallet({
+      name: newWalletName.trim(),
+      group: newWalletGroup,
+      kind: newWalletGroup === 'credit' ? 'liability' : 'asset',
+      openingBalance: parseAmountExpression(newWalletOpening).value,
+      openingDate: todayISO(),
+      icon: iconByGroup[newWalletGroup],
+      color: colorByGroup[newWalletGroup],
+      includeInTotal: true,
+      hidden: false,
+      archived: false,
+    });
+    setNewWalletName('');
+    setNewWalletOpening('');
+    setShowAddWallet(false);
+  };
+
   const handleStep1Next = () => {
     if (name.trim()) setDisplayName(name.trim());
     const numericMap: Record<string, number> = {};
     activeWallets.forEach((w) => {
-      numericMap[w.id] = parseAmountExpression(inputs[w.id] ?? '').value;
+      numericMap[w.id] = parseAmountExpression(getWalletInputValue(w)).value;
     });
     updateOpeningBalances(numericMap);
     setStep(2);
   };
 
   const fillQuickSample = () => {
-    setInputs({
+    setInputs((prev) => ({
+      ...prev,
       w_tunai: '320rb',
       w_jago: '3,2jt',
       w_krom: '1,5jt',
@@ -89,7 +146,7 @@ export function OnboardingWizard() {
       w_ovo: '90rb',
       w_emoney: '140rb',
       w_bibit: '10jt',
-    });
+    }));
   };
 
   return (
@@ -124,21 +181,95 @@ export function OnboardingWizard() {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
                 <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--mw-text)]">
-                  Atur saldo awal dompetmu
+                  Atur saldo awal dompetmu ({activeWallets.length})
                 </h1>
                 <p className="text-xs sm:text-sm text-[var(--mw-text-muted)]">
                   Mulai dari 0 dan isi saldo saat ini (boleh ketik <code className="font-mono text-[var(--mw-primary)]">350rb</code> atau <code className="font-mono text-[var(--mw-primary)]">2,5jt</code>). Bisa diubah kapan saja nanti.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={fillQuickSample}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-[var(--mw-surface-2)] hover:bg-[var(--mw-surface-3)] border border-[var(--mw-border)] text-[var(--mw-text-muted)] cursor-pointer transition"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-[var(--mw-primary)]" />
-                Isi contoh angka
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddWallet((v) => !v)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white cursor-pointer transition"
+                  style={{ background: 'var(--mw-primary)' }}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Tambah Wallet
+                </button>
+                <button
+                  type="button"
+                  onClick={fillQuickSample}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-[var(--mw-surface-2)] hover:bg-[var(--mw-surface-3)] border border-[var(--mw-border)] text-[var(--mw-text-muted)] cursor-pointer transition"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-[var(--mw-primary)]" />
+                  Isi contoh angka
+                </button>
+              </div>
             </div>
+
+            {showAddWallet && (
+              <form
+                onSubmit={handleAddWallet}
+                className="p-4 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-primary)] space-y-3 text-xs animate-sheet-up"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-[var(--mw-text)]">Tambah Wallet Baru</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddWallet(false)}
+                    className="p-1 rounded-lg text-[var(--mw-text-muted)] hover:text-[var(--mw-text)] cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    value={newWalletName}
+                    onChange={(e) => setNewWalletName(e.target.value)}
+                    placeholder="Nama (mis. BCA, SeaBank)"
+                    className="px-3 py-2 rounded-xl bg-[var(--mw-surface)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none focus:border-[var(--mw-primary)]"
+                  />
+                  <select
+                    value={newWalletGroup}
+                    onChange={(e) => setNewWalletGroup(e.target.value as WalletGroup)}
+                    className="px-3 py-2 rounded-xl bg-[var(--mw-surface)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none"
+                  >
+                    {WALLET_GROUP_ORDER.map((g) => (
+                      <option key={g} value={g}>
+                        {WALLET_GROUP_LABELS[g]}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={newWalletOpening}
+                    onChange={(e) => setNewWalletOpening(e.target.value)}
+                    placeholder="Saldo awal (mis. 500rb)"
+                    className="px-3 py-2 rounded-xl bg-[var(--mw-surface)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none focus:border-[var(--mw-primary)]"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddWallet(false)}
+                    className="px-3 py-1.5 rounded-xl bg-[var(--mw-surface)] text-[var(--mw-text-muted)] cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-1.5 rounded-xl font-semibold text-white cursor-pointer"
+                    style={{ background: 'var(--mw-primary)' }}
+                  >
+                    Simpan Wallet
+                  </button>
+                </div>
+              </form>
+            )}
 
             <div className="p-3.5 rounded-2xl bg-[var(--mw-surface-2)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <label className="text-xs font-medium text-[var(--mw-text-muted)] shrink-0" htmlFor="onb-name">
@@ -155,7 +286,7 @@ export function OnboardingWizard() {
             </div>
 
             <div className="max-h-[46vh] overflow-y-auto mw-scroll pr-1 space-y-4">
-              {WALLET_GROUP_ORDER.filter((g) => g !== 'credit').map((grp) => {
+              {WALLET_GROUP_ORDER.map((grp) => {
                 const list = activeWallets.filter((w) => w.group === grp);
                 if (list.length === 0) return null;
                 return (
@@ -165,7 +296,8 @@ export function OnboardingWizard() {
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {list.map((w) => {
-                        const parsed = parseAmountExpression(inputs[w.id] ?? '');
+                        const rawVal = getWalletInputValue(w);
+                        const parsed = parseAmountExpression(rawVal);
                         return (
                           <div
                             key={w.id}
@@ -186,7 +318,7 @@ export function OnboardingWizard() {
                                 <input
                                   type="text"
                                   inputMode="decimal"
-                                  value={inputs[w.id] ?? ''}
+                                  value={rawVal}
                                   onChange={(e) =>
                                     setInputs((prev) => ({ ...prev, [w.id]: e.target.value }))
                                   }
@@ -194,7 +326,7 @@ export function OnboardingWizard() {
                                   className="w-full bg-transparent text-sm font-semibold tab-num text-[var(--mw-text)] focus:outline-none"
                                 />
                               </div>
-                              {inputs[w.id] && /[a-z,+-]/i.test(inputs[w.id]) && (
+                              {rawVal && /[a-z,+-]/i.test(rawVal) && (
                                 <div className="text-xs text-[var(--mw-primary)] tab-num">
                                   = {formatIDR(parsed.value)}
                                 </div>

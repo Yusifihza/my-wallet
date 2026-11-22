@@ -74,8 +74,42 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return <AuthScreen />;
   }
 
+  const toastBanner = toast ? (
+    <div className="fixed bottom-20 md:bottom-6 right-4 left-4 md:left-auto md:w-96 z-50 animate-sheet-up">
+      <div className="px-4 py-3 rounded-2xl bg-[var(--mw-surface)] border border-[var(--mw-border)] shadow-xl flex items-center justify-between gap-3 text-xs">
+        <span className="text-[var(--mw-text)] font-medium truncate">{toast.text}</span>
+        <div className="flex items-center gap-2 shrink-0">
+          {toast.undo && (
+            <button
+              type="button"
+              onClick={() => {
+                toast.undo?.();
+                dismissToast();
+              }}
+              className="font-bold text-[var(--mw-primary)] hover:underline cursor-pointer"
+            >
+              Undo
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={dismissToast}
+            className="text-[var(--mw-text-dim)] hover:text-[var(--mw-text)] cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   if (!dataset.profile.onboardingCompleted) {
-    return <OnboardingWizard />;
+    return (
+      <>
+        <OnboardingWizard />
+        {toastBanner}
+      </>
+    );
   }
 
   const isDark = dataset.profile.theme !== 'light';
@@ -326,34 +360,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <QuickInputSheet />
 
       {/* UNDO TOAST */}
-      {toast && (
-        <div className="fixed bottom-20 md:bottom-6 right-4 left-4 md:left-auto md:w-96 z-50 animate-sheet-up">
-          <div className="px-4 py-3 rounded-2xl bg-[var(--mw-surface)] border border-[var(--mw-border)] shadow-xl flex items-center justify-between gap-3 text-xs">
-            <span className="text-[var(--mw-text)] font-medium truncate">{toast.text}</span>
-            <div className="flex items-center gap-2 shrink-0">
-              {toast.undo && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    toast.undo?.();
-                    dismissToast();
-                  }}
-                  className="font-bold text-[var(--mw-primary)] hover:underline cursor-pointer"
-                >
-                  Undo
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={dismissToast}
-                className="text-[var(--mw-text-dim)] hover:text-[var(--mw-text)] cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {toastBanner}
     </div>
   );
 }
