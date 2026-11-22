@@ -155,6 +155,7 @@ interface WalletContextValue {
   deleteGoalContribution: (contribId: string) => void;
   saveGoalInvite: (invite: GoalInvite) => void;
   addRecurringRule: (rule: Omit<RecurringRule, 'id'>) => void;
+  updateRecurringRule: (rule: RecurringRule) => void;
   toggleRecurringRule: (ruleId: string) => void;
   deleteRecurringRule: (ruleId: string) => void;
   executeRecurringRule: (ruleId: string) => void;
@@ -1077,6 +1078,32 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     [authMode, cloudUserId, commitDataset, showToast]
   );
 
+  const updateRecurringRule = useCallback(
+    (rule: RecurringRule) => {
+      const normalized: RecurringRule = {
+        ...rule,
+        label: rule.label.trim(),
+        amount: Math.round(Math.max(0, rule.amount)),
+        dayOfMonth: Math.min(28, Math.max(1, rule.dayOfMonth || 1)),
+      };
+      commitDataset((prev) => ({
+        ...prev,
+        recurringRules: prev.recurringRules.map((r) =>
+          r.id === normalized.id ? normalized : r
+        ),
+      }));
+      if (authMode === 'supabase' && cloudUserId) {
+        getSupabaseBrowserClient()
+          ?.from('recurring_rules')
+          .update(mapRecurringToDb(normalized, cloudUserId))
+          .eq('id', normalized.id)
+          .then(() => {});
+      }
+      showToast(`Jadwal rutin "${normalized.label}" diperbarui`);
+    },
+    [authMode, cloudUserId, commitDataset, showToast]
+  );
+
   const toggleRecurringRule = useCallback(
     (ruleId: string) => {
       const target = dataset.recurringRules.find((r) => r.id === ruleId);
@@ -1413,6 +1440,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     deleteGoalContribution,
     saveGoalInvite,
     addRecurringRule,
+    updateRecurringRule,
     toggleRecurringRule,
     deleteRecurringRule,
     executeRecurringRule,

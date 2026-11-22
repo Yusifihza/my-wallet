@@ -27,12 +27,14 @@ import type { RecurringRule, Transaction, TransactionType } from '@/types/financ
 export function TransactionsView() {
   const {
     dataset,
+    nowDate,
     periodLabel,
     periodTransactions,
     openQuickInput,
     addTransaction,
     deleteTransaction,
     addRecurringRule,
+    updateRecurringRule,
     toggleRecurringRule,
     deleteRecurringRule,
     executeRecurringRule,
@@ -46,8 +48,9 @@ export function TransactionsView() {
   const [typeFilter, setTypeFilter] = useState<'all' | TransactionType>('all');
   const [walletFilter, setWalletFilter] = useState<string>('all');
 
-  // Add recurring rule modal state
+  // Add / Edit recurring rule modal state
   const [showRecModal, setShowRecModal] = useState(false);
+  const [editingRecId, setEditingRecId] = useState<string | null>(null);
   const [recLabel, setRecLabel] = useState('');
   const [recType, setRecType] = useState<RecurringRule['type']>('expense');
   const [recAmt, setRecAmt] = useState('');
@@ -58,8 +61,12 @@ export function TransactionsView() {
     () => dataset.wallets.find((w) => w.group === 'investment')?.id ?? ''
   );
   const [recSubId, setRecSubId] = useState('');
+  const [recGoalId, setRecGoalId] = useState('');
+  const [recProdId, setRecProdId] = useState('');
   const [recDay, setRecDay] = useState('1');
   const [recFreq, setRecFreq] = useState<RecurringRule['frequency']>('monthly');
+  const [recNextRun, setRecNextRun] = useState('');
+  const [recNote, setRecNote] = useState('');
 
   const dueCount = useMemo(
     () => dataset.recurringRules.filter((r) => r.active && r.nextRun <= today).length,
@@ -77,6 +84,10 @@ export function TransactionsView() {
   const walletById = useMemo(
     () => new Map(dataset.wallets.map((w) => [w.id, w])),
     [dataset.wallets]
+  );
+  const prodById = useMemo(
+    () => new Map(dataset.investmentProducts.map((p) => [p.id, p])),
+    [dataset.investmentProducts]
   );
 
   const filtered = useMemo(() => {
@@ -151,33 +162,89 @@ export function TransactionsView() {
     URL.revokeObjectURL(url);
   };
 
-  const handleCreateRecurring = (e: React.FormEvent) => {
+  const openRecModal = (rule?: RecurringRule) => {
+    const defaultFrom =
+      dataset.wallets.find((w) => w.name === 'Jago')?.id ?? dataset.wallets[0]?.id ?? '';
+    const defaultInvest =
+      dataset.wallets.find((w) => w.group === 'investment')?.id ??
+      dataset.wallets.find((w) => w.id !== defaultFrom)?.id ??
+      '';
+    if (rule) {
+      setEditingRecId(rule.id);
+      setRecLabel(rule.label);
+      setRecType(rule.type);
+      setRecAmt(String(rule.amount));
+      setRecWalletId(rule.walletId);
+      setRecToWalletId(rule.toWalletId ?? defaultInvest);
+      setRecSubId(rule.subcategoryId ?? '');
+      setRecGoalId(rule.goalId ?? '');
+      setRecProdId(rule.investmentProductId ?? '');
+      setRecDay(String(rule.dayOfMonth));
+      setRecFreq(rule.frequency);
+      setRecNextRun(rule.nextRun);
+      setRecNote(rule.note ?? '');
+    } else {
+      setEditingRecId(null);
+      setRecLabel('');
+      setRecType('expense');
+      setRecAmt('');
+      setRecWalletId(defaultFrom);
+      setRecToWalletId(defaultInvest);
+      setRecSubId('');
+      setRecGoalId(dataset.goals.find((g) => g.isShared)?.id ?? dataset.goals[0]?.id ?? '');
+      setRecProdId('');
+      setRecDay('1');
+      setRecFreq('monthly');
+      setRecNextRun('');
+      setRecNote('');
+    }
+    setShowRecModal(true);
+  };
+
+  const closeRecModal = () => {
+    setShowRecModal(false);
+    setEditingRecId(null);
+  };
+
+  const handleSaveRecurring = (e: React.FormEvent) => {
     e.preventDefault();
     const amount = parseAmountExpression(recAmt).value;
     if (!recLabel.trim() || amount <= 0 || !recWalletId) return;
     const dayNum = Math.min(28, Math.max(1, Number(recDay) || 1));
-    const now = new Date();
-    const nextRun = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-    addRecurringRule({
+    const computedNextRun =
+      recNextRun ||
+      `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+    const toWalletObj = recToWalletId ? walletById.get(recToWalletId) : undefined;
+    const isBibitDest = recType === 'saving' && toWalletObj?.group === 'investment';
+    const payload = {
       label: recLabel.trim(),
       type: recType,
       amount,
       subcategoryId: recType === 'transfer' ? null : recSubId || null,
       walletId: recWalletId,
       toWalletId: recType === 'transfer' || recType === 'saving' ? recToWalletId || null : null,
-      goalId:
-        recType === 'saving'
-          ? dataset.goals.find((g) => g.isShared)?.id ?? dataset.goals[0]?.id ?? null
-          : null,
-      note: recLabel.trim(),
+      goalId: recType === 'saving' ? recGoalId || null : null,
+      investmentProductId: isBibitDest ? recProdId || null : null,
+      note: recNote.trim() || recLabel.trim(),
       frequency: recFreq,
       dayOfMonth: dayNum,
-      nextRun,
-      active: true,
-    });
-    setRecLabel('');
-    setRecAmt('');
-    setShowRecModal(false);
+      nextRun: computedNextRun,
+    };
+
+    if (editingRecId) {
+      const existing = dataset.recurringRules.find((r) => r.id === editingRecId);
+      updateRecurringRule({
+        ...payload,
+        id: editingRecId,
+        active: existing?.active ?? true,
+      });
+    } else {
+      addRecurringRule({
+        ...payload,
+        active: true,
+      });
+    }
+    closeRecModal();
   };
 
   const renderTxMeta = (tx: Transaction) => {
@@ -217,6 +284,10 @@ export function TransactionsView() {
 
     return { title, cat, fromW, toW, color, sign };
   };
+
+  const recParsedAmt = parseAmountExpression(recAmt).value;
+  const recDestWallet = recToWalletId ? walletById.get(recToWalletId) : undefined;
+  const recIsBibitDest = recType === 'saving' && recDestWallet?.group === 'investment';
 
   return (
     <div className="space-y-5">
@@ -289,7 +360,7 @@ export function TransactionsView() {
           ) : (
             <button
               type="button"
-              onClick={() => setShowRecModal(true)}
+              onClick={() => openRecModal()}
               className="px-3.5 py-2 rounded-xl text-xs font-semibold text-white inline-flex items-center gap-1.5 cursor-pointer"
               style={{ background: 'var(--mw-primary)' }}
             >
@@ -317,6 +388,15 @@ export function TransactionsView() {
                 const isDue = rule.active && rule.nextRun <= today;
                 const wName = walletById.get(rule.walletId)?.name ?? '';
                 const toName = rule.toWalletId ? walletById.get(rule.toWalletId)?.name : null;
+                const prodName = rule.investmentProductId
+                  ? prodById.get(rule.investmentProductId)?.name
+                  : null;
+                const freqText =
+                  rule.frequency === 'monthly'
+                    ? `Bulanan · tgl ${rule.dayOfMonth}`
+                    : rule.frequency === 'weekly'
+                      ? 'Mingguan'
+                      : 'Tahunan';
                 const typeCol =
                   rule.type === 'income'
                     ? 'var(--mw-income)'
@@ -348,8 +428,8 @@ export function TransactionsView() {
                         </div>
                         <div className="text-[var(--mw-text-muted)]">
                           {wName}
-                          {toName ? ` → ${toName}` : ''} · Setiap{' '}
-                          {rule.frequency === 'monthly' ? `tgl ${rule.dayOfMonth}` : rule.frequency}
+                          {toName ? ` → ${toName}` : ''}
+                          {prodName ? ` (${prodName})` : ''} · {freqText}
                         </div>
                         <div className="text-[11px] text-[var(--mw-text-dim)]">
                           Jadwal berikutnya: <b>{formatDateID(rule.nextRun)}</b>
@@ -373,6 +453,14 @@ export function TransactionsView() {
                           className="px-2.5 py-1 rounded-lg bg-[var(--mw-surface-2)] text-[var(--mw-text-muted)] hover:text-[var(--mw-text)] cursor-pointer"
                         >
                           {rule.active ? 'Aktif' : 'Nonaktif'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openRecModal(rule)}
+                          className="p-1.5 rounded-lg bg-[var(--mw-surface-2)] text-[var(--mw-text-muted)] hover:text-[var(--mw-text)] cursor-pointer"
+                          title="Edit jadwal"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
                         </button>
                         <button
                           type="button"
@@ -405,16 +493,16 @@ export function TransactionsView() {
               style={{ background: 'var(--mw-backdrop)' }}
             >
               <form
-                onSubmit={handleCreateRecurring}
-                className="w-full max-w-md mw-card rounded-3xl p-5 space-y-4 animate-sheet-up"
+                onSubmit={handleSaveRecurring}
+                className="w-full max-w-md max-h-[90vh] overflow-y-auto mw-card rounded-3xl p-5 space-y-4 animate-sheet-up"
               >
                 <div className="flex items-center justify-between">
                   <h2 className="text-base font-bold text-[var(--mw-text)]">
-                    Tambah Jadwal Transaksi Berulang
+                    {editingRecId ? 'Edit Jadwal Transaksi Berulang' : 'Tambah Jadwal Transaksi Berulang'}
                   </h2>
                   <button
                     type="button"
-                    onClick={() => setShowRecModal(false)}
+                    onClick={closeRecModal}
                     className="p-1.5 rounded-lg bg-[var(--mw-surface-2)] text-[var(--mw-text-muted)] cursor-pointer"
                   >
                     <X className="w-4 h-4" />
@@ -439,7 +527,11 @@ export function TransactionsView() {
                       <label className="block text-[var(--mw-text-muted)] mb-1">Tipe</label>
                       <select
                         value={recType}
-                        onChange={(e) => setRecType(e.target.value as RecurringRule['type'])}
+                        onChange={(e) => {
+                          const next = e.target.value as RecurringRule['type'];
+                          setRecType(next);
+                          setRecSubId('');
+                        }}
                         className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)]"
                       >
                         <option value="expense">Expense</option>
@@ -458,11 +550,18 @@ export function TransactionsView() {
                         placeholder="Mis. 950rb atau 6jt"
                         className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none"
                       />
+                      {recParsedAmt > 0 && (
+                        <div className="mt-0.5 text-[11px] font-semibold tab-num text-[var(--mw-primary)]">
+                          = {formatIDR(recParsedAmt)}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-[var(--mw-text-muted)] mb-1">Wallet Utama</label>
+                      <label className="block text-[var(--mw-text-muted)] mb-1">
+                        {recType === 'transfer' || recType === 'saving' ? 'Dari Wallet' : 'Wallet Utama'}
+                      </label>
                       <select
                         value={recWalletId}
                         onChange={(e) => setRecWalletId(e.target.value)}
@@ -517,6 +616,62 @@ export function TransactionsView() {
                       </div>
                     )}
                   </div>
+
+                  {recType === 'saving' && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[var(--mw-text-muted)] mb-1">Goal Terkait</label>
+                        <select
+                          value={recGoalId}
+                          onChange={(e) => setRecGoalId(e.target.value)}
+                          className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)]"
+                        >
+                          <option value="">Tanpa Goal</option>
+                          {dataset.goals.map((g) => (
+                            <option key={g.id} value={g.id}>
+                              {g.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      {recIsBibitDest && dataset.investmentProducts.length > 0 ? (
+                        <div>
+                          <label className="block text-[var(--mw-text-muted)] mb-1">Produk Bibit</label>
+                          <select
+                            value={recProdId}
+                            onChange={(e) => setRecProdId(e.target.value)}
+                            className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)]"
+                          >
+                            <option value="">Umum (Semua Bibit)</option>
+                            {dataset.investmentProducts.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="block text-[var(--mw-text-muted)] mb-1">Sub-Kategori</label>
+                          <select
+                            value={recSubId}
+                            onChange={(e) => setRecSubId(e.target.value)}
+                            className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)]"
+                          >
+                            <option value="">Pilih sub-kategori...</option>
+                            {dataset.subcategories
+                              .filter((s) => catById.get(s.categoryId)?.type === 'saving' && !s.archived)
+                              .map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  {catById.get(s.categoryId)?.name} › {s.name}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="block text-[var(--mw-text-muted)] mb-1">Frekuensi</label>
@@ -542,12 +697,34 @@ export function TransactionsView() {
                       />
                     </div>
                   </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[var(--mw-text-muted)] mb-1">Jadwal Berikutnya</label>
+                      <input
+                        type="date"
+                        value={recNextRun}
+                        onChange={(e) => setRecNextRun(e.target.value)}
+                        className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[var(--mw-text-muted)] mb-1">Catatan (opsional)</label>
+                      <input
+                        type="text"
+                        value={recNote}
+                        onChange={(e) => setRecNote(e.target.value)}
+                        placeholder="Catatan otomatis"
+                        className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
-                    onClick={() => setShowRecModal(false)}
+                    onClick={closeRecModal}
                     className="px-4 py-2.5 rounded-xl text-xs font-medium bg-[var(--mw-surface-2)] text-[var(--mw-text)] cursor-pointer"
                   >
                     Batal
@@ -557,7 +734,7 @@ export function TransactionsView() {
                     className="px-5 py-2.5 rounded-xl text-xs font-semibold text-white cursor-pointer"
                     style={{ background: 'var(--mw-primary)' }}
                   >
-                    Simpan Jadwal
+                    {editingRecId ? 'Simpan Perubahan' : 'Simpan Jadwal'}
                   </button>
                 </div>
               </form>
