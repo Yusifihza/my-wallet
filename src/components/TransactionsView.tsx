@@ -2,12 +2,15 @@
 
 import { useMemo, useState } from 'react';
 import {
+  Check,
   Copy,
   Download,
   Pencil,
   Plus,
+  Repeat,
   Search,
   Trash2,
+  X,
 } from 'lucide-react';
 import { DynamicIcon } from '@/components/IconMap';
 import { useWallet } from '@/context/WalletContext';
@@ -15,10 +18,11 @@ import {
   calculatePeriodSummary,
   formatDateID,
   formatIDR,
+  parseAmountExpression,
   transactionsToCSV,
 } from '@/lib/finance';
 import { todayISO } from '@/lib/seed';
-import type { Transaction, TransactionType } from '@/types/finance';
+import type { RecurringRule, Transaction, TransactionType } from '@/types/finance';
 
 export function TransactionsView() {
   const {
@@ -28,14 +32,39 @@ export function TransactionsView() {
     openQuickInput,
     addTransaction,
     deleteTransaction,
+    addRecurringRule,
+    toggleRecurringRule,
+    deleteRecurringRule,
+    executeRecurringRule,
   } = useWallet();
 
   const today = todayISO();
   const privacy = dataset.profile.privacyMode;
 
+  const [viewTab, setViewTab] = useState<'history' | 'recurring'>('history');
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | TransactionType>('all');
   const [walletFilter, setWalletFilter] = useState<string>('all');
+
+  // Add recurring rule modal state
+  const [showRecModal, setShowRecModal] = useState(false);
+  const [recLabel, setRecLabel] = useState('');
+  const [recType, setRecType] = useState<RecurringRule['type']>('expense');
+  const [recAmt, setRecAmt] = useState('');
+  const [recWalletId, setRecWalletId] = useState(
+    () => dataset.wallets.find((w) => w.name === 'Jago')?.id ?? dataset.wallets[0]?.id ?? ''
+  );
+  const [recToWalletId, setRecToWalletId] = useState(
+    () => dataset.wallets.find((w) => w.group === 'investment')?.id ?? ''
+  );
+  const [recSubId, setRecSubId] = useState('');
+  const [recDay, setRecDay] = useState('1');
+  const [recFreq, setRecFreq] = useState<RecurringRule['frequency']>('monthly');
+
+  const dueCount = useMemo(
+    () => dataset.recurringRules.filter((r) => r.active && r.nextRun <= today).length,
+    [dataset.recurringRules, today]
+  );
 
   const subById = useMemo(
     () => new Map(dataset.subcategories.map((s) => [s.id, s])),
@@ -101,6 +130,7 @@ export function TransactionsView() {
       amount: tx.amount,
       fee: tx.fee,
       goalId: tx.goalId,
+      investmentProductId: tx.investmentProductId ?? null,
       note: tx.note,
     });
   };
@@ -119,6 +149,35 @@ export function TransactionsView() {
     a.download = `my-wallet-transaksi-${today}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleCreateRecurring = (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseAmountExpression(recAmt).value;
+    if (!recLabel.trim() || amount <= 0 || !recWalletId) return;
+    const dayNum = Math.min(28, Math.max(1, Number(recDay) || 1));
+    const now = new Date();
+    const nextRun = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+    addRecurringRule({
+      label: recLabel.trim(),
+      type: recType,
+      amount,
+      subcategoryId: recType === 'transfer' ? null : recSubId || null,
+      walletId: recWalletId,
+      toWalletId: recType === 'transfer' || recType === 'saving' ? recToWalletId || null : null,
+      goalId:
+        recType === 'saving'
+          ? dataset.goals.find((g) => g.isShared)?.id ?? dataset.goals[0]?.id ?? null
+          : null,
+      note: recLabel.trim(),
+      frequency: recFreq,
+      dayOfMonth: dayNum,
+      nextRun,
+      active: true,
+    });
+    setRecLabel('');
+    setRecAmt('');
+    setShowRecModal(false);
   };
 
   const renderTxMeta = (tx: Transaction) => {
@@ -165,34 +224,348 @@ export function TransactionsView() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl md:text-2xl font-bold tracking-tight text-[var(--mw-text)]">
-            Riwayat Transaksi
+            {viewTab === 'history' ? 'Riwayat Transaksi' : 'Transaksi Berulang'}
           </h1>
           <p className="text-xs text-[var(--mw-text-muted)]">
-            {periodLabel} · {filtered.length} transaksi ditampilkan
+            {viewTab === 'history'
+              ? `${periodLabel} · ${filtered.length} transaksi ditampilkan`
+              : `${dataset.recurringRules.length} jadwal rutin · ${dueCount} jatuh tempo`}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleExportCSV}
-            disabled={filtered.length === 0}
-            className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[var(--mw-surface)] hover:bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export CSV</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => openQuickInput({ mode: 'create' })}
-            className="px-3.5 py-2 rounded-xl text-xs font-semibold text-white inline-flex items-center gap-1.5 cursor-pointer"
-            style={{ background: 'var(--mw-primary)' }}
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Catat</span>
-          </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex p-1 rounded-xl bg-[var(--mw-surface)] border border-[var(--mw-border)] text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setViewTab('history')}
+              className="px-3 py-1.5 rounded-lg cursor-pointer transition"
+              style={{
+                background: viewTab === 'history' ? 'var(--mw-primary-soft)' : 'transparent',
+                color: viewTab === 'history' ? 'var(--mw-primary)' : 'var(--mw-text-muted)',
+              }}
+            >
+              Riwayat
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewTab('recurring')}
+              className="px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 cursor-pointer transition"
+              style={{
+                background: viewTab === 'recurring' ? 'var(--mw-primary-soft)' : 'transparent',
+                color: viewTab === 'recurring' ? 'var(--mw-primary)' : 'var(--mw-text-muted)',
+              }}
+            >
+              <Repeat className="w-3.5 h-3.5" />
+              <span>Berulang</span>
+              {dueCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-500 text-white">
+                  {dueCount}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {viewTab === 'history' ? (
+            <>
+              <button
+                type="button"
+                onClick={handleExportCSV}
+                disabled={filtered.length === 0}
+                className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[var(--mw-surface)] hover:bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export CSV</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => openQuickInput({ mode: 'create' })}
+                className="px-3.5 py-2 rounded-xl text-xs font-semibold text-white inline-flex items-center gap-1.5 cursor-pointer"
+                style={{ background: 'var(--mw-primary)' }}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Catat</span>
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowRecModal(true)}
+              className="px-3.5 py-2 rounded-xl text-xs font-semibold text-white inline-flex items-center gap-1.5 cursor-pointer"
+              style={{ background: 'var(--mw-primary)' }}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Tambah Jadwal Rutin</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {viewTab === 'recurring' ? (
+        <div className="space-y-3">
+          {dataset.recurringRules.length === 0 ? (
+            <div className="mw-card rounded-3xl p-10 text-center space-y-2 text-xs text-[var(--mw-text-muted)]">
+              <p className="text-sm font-semibold text-[var(--mw-text)]">
+                Belum ada jadwal transaksi berulang
+              </p>
+              <p>
+                Tambahkan jadwal rutin seperti Gaji bulanan, Kos, Internet, Langganan, atau Setoran Wedding agar tinggal 1-klik catat setiap bulan.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {dataset.recurringRules.map((rule) => {
+                const isDue = rule.active && rule.nextRun <= today;
+                const wName = walletById.get(rule.walletId)?.name ?? '';
+                const toName = rule.toWalletId ? walletById.get(rule.toWalletId)?.name : null;
+                const typeCol =
+                  rule.type === 'income'
+                    ? 'var(--mw-income)'
+                    : rule.type === 'expense'
+                      ? 'var(--mw-expense)'
+                      : rule.type === 'saving'
+                        ? 'var(--mw-saving)'
+                        : 'var(--mw-transfer)';
+                return (
+                  <div
+                    key={rule.id}
+                    className="mw-card rounded-2xl p-4 space-y-3 text-xs flex flex-col justify-between"
+                    style={{ opacity: rule.active ? 1 : 0.6 }}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-bold text-[var(--mw-text)] truncate">
+                            {rule.label}
+                          </span>
+                          {isDue && (
+                            <span
+                              className="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                              style={{ background: 'var(--mw-warn-soft)', color: 'var(--mw-warn)' }}
+                            >
+                              Jatuh Tempo
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[var(--mw-text-muted)]">
+                          {wName}
+                          {toName ? ` → ${toName}` : ''} · Setiap{' '}
+                          {rule.frequency === 'monthly' ? `tgl ${rule.dayOfMonth}` : rule.frequency}
+                        </div>
+                        <div className="text-[11px] text-[var(--mw-text-dim)]">
+                          Jadwal berikutnya: <b>{formatDateID(rule.nextRun)}</b>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-sm font-extrabold tab-num" style={{ color: typeCol }}>
+                          {formatIDR(rule.amount, privacy)}
+                        </div>
+                        <div className="text-[11px] uppercase text-[var(--mw-text-dim)]">
+                          {rule.type}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-[var(--mw-border)]">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => toggleRecurringRule(rule.id)}
+                          className="px-2.5 py-1 rounded-lg bg-[var(--mw-surface-2)] text-[var(--mw-text-muted)] hover:text-[var(--mw-text)] cursor-pointer"
+                        >
+                          {rule.active ? 'Aktif' : 'Nonaktif'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteRecurringRule(rule.id)}
+                          className="p-1.5 rounded-lg bg-[var(--mw-surface-2)] text-[var(--mw-text-dim)] hover:text-red-400 cursor-pointer"
+                          title="Hapus jadwal"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => executeRecurringRule(rule.id)}
+                        className="px-3 py-1.5 rounded-xl font-semibold text-white inline-flex items-center gap-1 cursor-pointer"
+                        style={{ background: 'var(--mw-primary)' }}
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Catat Sekarang</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {showRecModal && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center p-4"
+              style={{ background: 'var(--mw-backdrop)' }}
+            >
+              <form
+                onSubmit={handleCreateRecurring}
+                className="w-full max-w-md mw-card rounded-3xl p-5 space-y-4 animate-sheet-up"
+              >
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-bold text-[var(--mw-text)]">
+                    Tambah Jadwal Transaksi Berulang
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setShowRecModal(false)}
+                    className="p-1.5 rounded-lg bg-[var(--mw-surface-2)] text-[var(--mw-text-muted)] cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="block text-[var(--mw-text-muted)] mb-1">Nama Jadwal</label>
+                    <input
+                      type="text"
+                      required
+                      autoFocus
+                      value={recLabel}
+                      onChange={(e) => setRecLabel(e.target.value)}
+                      placeholder="Mis. Bayar Kos, Gaji, Setoran Wedding"
+                      className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[var(--mw-text-muted)] mb-1">Tipe</label>
+                      <select
+                        value={recType}
+                        onChange={(e) => setRecType(e.target.value as RecurringRule['type'])}
+                        className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)]"
+                      >
+                        <option value="expense">Expense</option>
+                        <option value="income">Income</option>
+                        <option value="saving">Saving</option>
+                        <option value="transfer">Transfer</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[var(--mw-text-muted)] mb-1">Nominal</label>
+                      <input
+                        type="text"
+                        required
+                        value={recAmt}
+                        onChange={(e) => setRecAmt(e.target.value)}
+                        placeholder="Mis. 950rb atau 6jt"
+                        className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[var(--mw-text-muted)] mb-1">Wallet Utama</label>
+                      <select
+                        value={recWalletId}
+                        onChange={(e) => setRecWalletId(e.target.value)}
+                        className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)]"
+                      >
+                        {dataset.wallets
+                          .filter((w) => !w.hidden)
+                          .map((w) => (
+                            <option key={w.id} value={w.id}>
+                              {w.name}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                    {recType === 'saving' || recType === 'transfer' ? (
+                      <div>
+                        <label className="block text-[var(--mw-text-muted)] mb-1">Ke Wallet</label>
+                        <select
+                          value={recToWalletId}
+                          onChange={(e) => setRecToWalletId(e.target.value)}
+                          className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)]"
+                        >
+                          {dataset.wallets
+                            .filter((w) => !w.hidden)
+                            .map((w) => (
+                              <option key={w.id} value={w.id}>
+                                {w.name}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-[var(--mw-text-muted)] mb-1">Sub-Kategori</label>
+                        <select
+                          value={recSubId}
+                          onChange={(e) => setRecSubId(e.target.value)}
+                          className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)]"
+                        >
+                          <option value="">Pilih sub-kategori...</option>
+                          {dataset.subcategories
+                            .filter((s) => {
+                              const c = catById.get(s.categoryId);
+                              return c?.type === recType && !s.archived;
+                            })
+                            .map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {catById.get(s.categoryId)?.name} › {s.name}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[var(--mw-text-muted)] mb-1">Frekuensi</label>
+                      <select
+                        value={recFreq}
+                        onChange={(e) => setRecFreq(e.target.value as RecurringRule['frequency'])}
+                        className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)]"
+                      >
+                        <option value="monthly">Bulanan</option>
+                        <option value="weekly">Mingguan</option>
+                        <option value="yearly">Tahunan</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[var(--mw-text-muted)] mb-1">Tanggal (1–28)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={28}
+                        value={recDay}
+                        onChange={(e) => setRecDay(e.target.value)}
+                        className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowRecModal(false)}
+                    className="px-4 py-2.5 rounded-xl text-xs font-medium bg-[var(--mw-surface-2)] text-[var(--mw-text)] cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-xl text-xs font-semibold text-white cursor-pointer"
+                    style={{ background: 'var(--mw-primary)' }}
+                  >
+                    Simpan Jadwal
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
 
       {/* Filters */}
       <div className="mw-card rounded-2xl p-3.5 flex flex-col md:flex-row gap-2.5">
@@ -449,6 +822,8 @@ export function TransactionsView() {
               </table>
             </div>
           </div>
+        </>
+      )}
         </>
       )}
     </div>

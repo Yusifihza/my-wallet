@@ -28,6 +28,16 @@ export type PeriodPreset =
   | 'this_year'
   | 'all';
 
+export type InvestmentAssetClass =
+  | 'pu'
+  | 'obligasi'
+  | 'reksa_saham'
+  | 'saham'
+  | 'sbn'
+  | 'emas'
+  | 'campuran'
+  | 'lainnya';
+
 export interface UserProfile {
   id: string;
   displayName: string;
@@ -38,6 +48,7 @@ export interface UserProfile {
   theme: ThemePreference;
   privacyMode: boolean;
   onboardingCompleted: boolean;
+  isDemoData?: boolean;
 }
 
 export interface Wallet {
@@ -60,6 +71,19 @@ export interface WalletValuation {
   walletId: string;
   date: string; // YYYY-MM-DD
   marketValue: number;
+}
+
+export interface InvestmentProduct {
+  id: string;
+  walletId: string;
+  goalId: string | null; // e.g., goal_wedding or null (personal)
+  name: string; // e.g., Pasar Uang (PU), Obligasi, Reksa Saham, Saham, SBN
+  assetClass: InvestmentAssetClass;
+  investedAmount: number; // total principal deposited (modal setor)
+  marketValue: number; // current market value (nilai pasar)
+  color: string;
+  updatedAt: string; // YYYY-MM-DD
+  sortOrder: number;
 }
 
 export interface Category {
@@ -98,6 +122,74 @@ export interface Goal {
   status: 'active' | 'completed' | 'archived';
 }
 
+export interface GoalContribution {
+  id: string;
+  goalId: string;
+  contributorName: string;
+  isPartner: boolean;
+  amount: number;
+  date: string; // YYYY-MM-DD
+  productName?: string; // e.g. Pasar Uang (PU), Obligasi, SBN
+  note: string;
+}
+
+export interface GoalInvite {
+  goalId: string;
+  code: string;
+  partnerName: string;
+  partnerEmail: string;
+  sharePercent: number; // partner target share 0..100
+  status: 'pending' | 'joined';
+}
+
+export interface RecurringRule {
+  id: string;
+  label: string;
+  type: 'income' | 'expense' | 'saving' | 'transfer';
+  amount: number;
+  subcategoryId: string | null;
+  walletId: string;
+  toWalletId: string | null;
+  goalId: string | null;
+  investmentProductId?: string | null;
+  note: string;
+  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  dayOfMonth: number; // 1..28
+  nextRun: string; // YYYY-MM-DD
+  active: boolean;
+}
+
+export interface AIFeedbackEntry {
+  id: string;
+  topic: string;
+  vote: 'up' | 'down';
+  note: string;
+  createdAt: string;
+}
+
+export interface AIMemory {
+  patterns: string[];
+  preferences: Record<string, string>;
+  feedbackLog: AIFeedbackEntry[];
+}
+
+export interface AIChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  topic?: string;
+  feedback?: 'up' | 'down';
+  createdAt: string;
+}
+
+export interface SheetsSyncConfig {
+  status: 'disconnected' | 'connected';
+  spreadsheetId: string;
+  spreadsheetUrl: string;
+  autoSync: boolean;
+  lastSyncedAt: string | null;
+}
+
 export interface Transaction {
   id: string;
   date: string; // YYYY-MM-DD
@@ -108,6 +200,7 @@ export interface Transaction {
   amount: number; // positive integer IDR (adjustment may be negative)
   fee: number; // optional admin fee on transfer -> counted as Expense (Lainnya > Biaya)
   goalId: string | null;
+  investmentProductId?: string | null; // optional Bibit product tagged on saving/withdrawal
   note: string;
   createdAt: string; // ISO timestamp
 }
@@ -121,6 +214,7 @@ export interface QuickTemplate {
   walletId: string;
   toWalletId?: string | null;
   goalId?: string | null;
+  investmentProductId?: string | null;
   note: string;
 }
 
@@ -132,13 +226,19 @@ export interface AppDataset {
   goals: Goal[];
   transactions: Transaction[];
   valuations: WalletValuation[];
+  investmentProducts: InvestmentProduct[];
+  goalContributions: GoalContribution[];
+  goalInvites: GoalInvite[];
+  recurringRules: RecurringRule[];
+  aiMemory: AIMemory;
+  sheetsSync: SheetsSyncConfig;
   templates: QuickTemplate[];
 }
 
 export interface WalletBalanceSummary {
   wallet: Wallet;
-  costBasis: number; // openingBalance + inflow - outflow
-  balance: number; // market value for investment if valuation exists, else costBasis
+  costBasis: number; // openingBalance + inflow - outflow (or sum of product invested)
+  balance: number; // market value for investment if valuation/products exist, else costBasis
   unrealizedGain: number;
   unrealizedGainPct: number | null;
   lastValuationDate: string | null;

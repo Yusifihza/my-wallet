@@ -5,9 +5,11 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   ArrowLeftRight,
+  BarChart3,
   Cloud,
   Eye,
   EyeOff,
+  FlaskConical,
   HardDrive,
   Home,
   Menu,
@@ -15,6 +17,7 @@ import {
   PieChart,
   Plus,
   Settings,
+  Sparkles,
   Sun,
   Target,
   Wallet,
@@ -31,9 +34,11 @@ import type { PeriodPreset } from '@/types/finance';
 const NAV_ITEMS = [
   { href: '/', label: 'Beranda', icon: Home },
   { href: '/transactions', label: 'Transaksi', icon: ArrowLeftRight },
-  { href: '/wallets', label: 'Wallet', icon: Wallet },
+  { href: '/wallets', label: 'Wallet & Bibit', icon: Wallet },
   { href: '/budget', label: 'Budget', icon: PieChart },
   { href: '/goals', label: 'Goals', icon: Target },
+  { href: '/analytics', label: 'Analitik', icon: BarChart3 },
+  { href: '/advisor', label: 'AI Advisor', icon: Sparkles },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -50,6 +55,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     dismissToast,
     setTheme,
     togglePrivacyMode,
+    removeDummyData,
   } = useWallet();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -254,6 +260,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
+        {/* DEMO DATA BANNER */}
+        {dataset.profile.isDemoData && (
+          <div
+            className="px-4 md:px-6 py-2 border-b border-[var(--mw-border)] flex flex-wrap items-center justify-between gap-2 text-xs"
+            style={{ background: 'var(--mw-warn-soft)' }}
+          >
+            <span className="inline-flex items-center gap-1.5 font-medium text-[var(--mw-text)]">
+              <FlaskConical className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--mw-warn)' }} />
+              <span>Mode Data Dummy 3 Bulan aktif (hanya untuk simulasi).</span>
+            </span>
+            <button
+              type="button"
+              onClick={removeDummyData}
+              className="px-2.5 py-1 rounded-lg font-semibold bg-[var(--mw-surface)] border border-[var(--mw-border)] text-[var(--mw-text)] hover:border-[var(--mw-expense)] cursor-pointer transition"
+            >
+              Hapus Data Dummy (Mulai dari 0)
+            </button>
+          </div>
+        )}
+
         {/* PAGE BODY */}
         <main className="flex-1 w-full max-w-7xl mx-auto px-4 md:px-6 py-4 md:py-6 pb-24 md:pb-8">
           {children}
@@ -327,8 +353,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
             <div className="grid grid-cols-2 gap-2.5">
               {[
-                { href: '/wallets', label: 'Wallet & Transfer', icon: Wallet },
+                { href: '/wallets', label: 'Wallet & Bibit', icon: Wallet },
                 { href: '/budget', label: 'Budget Bulanan', icon: PieChart },
+                { href: '/analytics', label: 'Analitik & Heatmap', icon: BarChart3 },
+                { href: '/advisor', label: 'AI Advisor', icon: Sparkles },
                 { href: '/goals', label: 'Target Tabungan', icon: Target },
                 { href: '/settings', label: 'Settings', icon: Settings },
               ].map((item) => {

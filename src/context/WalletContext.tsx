@@ -8,7 +8,9 @@ import React, {
   useMemo,
   useState,
 } from 'react';
+import { applyThreeMonthDummyData, clearDummyData } from '@/lib/dummyData';
 import {
+  advanceRecurringDate,
   calculateNetWorth,
   calculatePeriodSummary,
   calculateWalletBalances,
@@ -22,7 +24,11 @@ import {
   isLocalModeOptedIn,
   loadLocalDataset,
   loadSupabaseDataset,
+  mapContributionToDb,
   mapGoalToDb,
+  mapInviteToDb,
+  mapProductToDb,
+  mapRecurringToDb,
   mapTxToDb,
   mapWalletToDb,
   resetLocalDataset,
@@ -34,8 +40,13 @@ import type {
   AppDataset,
   Category,
   Goal,
+  GoalContribution,
+  GoalInvite,
+  InvestmentProduct,
   PeriodPreset,
   PeriodSummary,
+  RecurringRule,
+  SheetsSyncConfig,
   Subcategory,
   ThemePreference,
   Transaction,
@@ -53,6 +64,7 @@ export interface QuickInputPreset {
   toWalletId?: string;
   goalId?: string;
   subcategoryId?: string;
+  investmentProductId?: string;
 }
 
 export interface ToastMessage {
@@ -61,8 +73,14 @@ export interface ToastMessage {
   undo?: () => void;
 }
 
+export interface AuthActionResult {
+  error?: string;
+  message?: string;
+}
+
 interface WalletContextValue {
   loading: boolean;
+  nowDate: Date;
   authMode: 'unauthenticated' | 'local' | 'supabase';
   supabaseConfigured: boolean;
   dataset: AppDataset;
@@ -85,9 +103,15 @@ interface WalletContextValue {
   dismissToast: () => void;
   // Auth
   signInWithGoogle: () => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<AuthActionResult>;
+  signUpWithEmail: (
+    email: string,
+    password: string,
+    displayName: string
+  ) => Promise<AuthActionResult>;
   continueLocalMode: () => void;
   signOut: () => Promise<void>;
-  // Mutations
+  // Mutations — Phase 1
   addTransaction: (tx: Omit<Transaction, 'id' | 'createdAt'>) => void;
   updateTransaction: (tx: Transaction) => void;
   deleteTransaction: (txId: string) => void;
@@ -104,7 +128,12 @@ interface WalletContextValue {
   ) => void;
   updateCategoryCap: (categoryId: string, cap: number | null) => void;
   updateSubcategoryBudget: (subcategoryId: string, budget: number | null) => void;
-  addSubcategory: (categoryId: string, name: string, monthlyBudget: number | null, aliases?: string[]) => void;
+  addSubcategory: (
+    categoryId: string,
+    name: string,
+    monthlyBudget: number | null,
+    aliases?: string[]
+  ) => void;
   addGoal: (goal: Omit<Goal, 'id' | 'priority' | 'status'>) => void;
   updateGoal: (goal: Goal) => void;
   deleteGoal: (goalId: string) => void;
@@ -115,9 +144,30 @@ interface WalletContextValue {
   completeOnboarding: () => void;
   reopenOnboarding: () => void;
   resetLocalData: () => void;
+  // Mutations — Phase 2 & 3
+  addInvestmentProduct: (
+    prod: Omit<InvestmentProduct, 'id' | 'sortOrder' | 'updatedAt'>
+  ) => void;
+  updateInvestmentProduct: (prod: InvestmentProduct) => void;
+  updateProductMarketValue: (productId: string, marketValue: number) => void;
+  deleteInvestmentProduct: (productId: string) => void;
+  addGoalContribution: (contrib: Omit<GoalContribution, 'id'>) => void;
+  deleteGoalContribution: (contribId: string) => void;
+  saveGoalInvite: (invite: GoalInvite) => void;
+  addRecurringRule: (rule: Omit<RecurringRule, 'id'>) => void;
+  toggleRecurringRule: (ruleId: string) => void;
+  deleteRecurringRule: (ruleId: string) => void;
+  executeRecurringRule: (ruleId: string) => void;
+  recordAIFeedback: (topic: string, vote: 'up' | 'down', note?: string) => void;
+  clearAIMemory: () => void;
+  updateSheetsSync: (partial: Partial<SheetsSyncConfig>) => void;
+  triggerSheetsSync: () => Promise<{ ok: boolean; message: string }>;
+  loadThreeMonthDummyData: () => void;
+  removeDummyData: () => void;
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
+const SSR_FALLBACK_DATE = new Date('2026-01-01T00:00:00.000Z');
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const supabaseConfigured = isSupabaseConfigured();
@@ -256,6 +306,77 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const signInWithEmail = useCallback(
+    async (email: string, password: string): Promise<AuthActionResult> => {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) return { error: 'Supabase belum terhubung.' };
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (error) {
+        if (error.message.toLowerCase().includes('invalid login')) {
+          return { error: 'Email atau password salah. Cek kembali atau daftar akun baru.' };
+        }
+        if (error.message.toLowerCase().includes('email not confirmed')) {
+          return { error: 'Email belum dikonfirmasi. Cek kotak masuk emailmu terlebih dahulu.' };
+        }
+        return { error: error.message };
+      }
+      if (data.user) {
+        setLocalModeOptIn(false);
+        const loaded = await loadSupabaseDataset(supabase, data.user.id, {
+          name: data.user.user_metadata?.full_name || data.user.user_metadata?.name,
+          email: data.user.email,
+        });
+        setCloudUserId(data.user.id);
+        setDataset(loaded);
+        setAuthMode('supabase');
+      }
+      return {};
+    },
+    []
+  );
+
+  const signUpWithEmail = useCallback(
+    async (
+      email: string,
+      password: string,
+      displayName: string
+    ): Promise<AuthActionResult> => {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) return { error: 'Supabase belum terhubung.' };
+      if (password.length < 6) {
+        return { error: 'Password minimal 6 karakter.' };
+      }
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: { full_name: displayName.trim() || email.split('@')[0] },
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
+      if (error) return { error: error.message };
+      if (data.session && data.user) {
+        setLocalModeOptIn(false);
+        const loaded = await loadSupabaseDataset(supabase, data.user.id, {
+          name: displayName.trim() || data.user.email?.split('@')[0],
+          email: data.user.email,
+        });
+        setCloudUserId(data.user.id);
+        setDataset(loaded);
+        setAuthMode('supabase');
+        return {};
+      }
+      return {
+        message:
+          'Akun dibuat! Cek kotak masuk emailmu untuk klik link verifikasi, lalu masuk kembali.',
+      };
+    },
+    []
+  );
+
   const continueLocalMode = useCallback(() => {
     setLocalModeOptIn(true);
     const local = loadLocalDataset();
@@ -273,7 +394,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setAuthMode('unauthenticated');
   }, [authMode]);
 
-  // ==================== MUTATIONS ====================
+  // ==================== MUTATIONS — PHASE 1 ====================
 
   const addTransaction = useCallback(
     (input: Omit<Transaction, 'id' | 'createdAt'>) => {
@@ -282,10 +403,33 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         id: generateUUID(),
         createdAt: new Date().toISOString(),
       };
-      commitDataset((prev) => ({
-        ...prev,
-        transactions: [tx, ...prev.transactions],
-      }));
+      const prodDelta =
+        tx.investmentProductId && (tx.type === 'saving' || tx.type === 'saving_withdrawal')
+          ? tx.type === 'saving'
+            ? tx.amount
+            : -tx.amount
+          : 0;
+
+      commitDataset((prev) => {
+        const updatedProducts =
+          prodDelta !== 0 && tx.investmentProductId
+            ? prev.investmentProducts.map((p) =>
+                p.id === tx.investmentProductId
+                  ? {
+                      ...p,
+                      investedAmount: Math.max(0, p.investedAmount + prodDelta),
+                      marketValue: Math.max(0, p.marketValue + prodDelta),
+                      updatedAt: tx.date,
+                    }
+                  : p
+              )
+            : prev.investmentProducts;
+        return {
+          ...prev,
+          transactions: [tx, ...prev.transactions],
+          investmentProducts: updatedProducts,
+        };
+      });
 
       setRecentWalletIds((prev) =>
         [tx.walletId, ...prev.filter((id) => id !== tx.walletId)].slice(0, 3)
@@ -294,6 +438,20 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       if (authMode === 'supabase' && cloudUserId) {
         const supabase = getSupabaseBrowserClient();
         supabase?.from('transactions').insert(mapTxToDb(tx, cloudUserId)).then(() => {});
+        if (prodDelta !== 0 && tx.investmentProductId) {
+          const curProd = dataset.investmentProducts.find((p) => p.id === tx.investmentProductId);
+          if (curProd) {
+            supabase
+              ?.from('investment_products')
+              .update({
+                invested_amount: Math.max(0, curProd.investedAmount + prodDelta),
+                market_value: Math.max(0, curProd.marketValue + prodDelta),
+                updated_at: tx.date,
+              })
+              .eq('id', curProd.id)
+              .then(() => {});
+          }
+        }
       }
 
       const labelMap: Record<TransactionType, string> = {
@@ -310,6 +468,18 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
           commitDataset((prev) => ({
             ...prev,
             transactions: prev.transactions.filter((t) => t.id !== tx.id),
+            investmentProducts:
+              prodDelta !== 0 && tx.investmentProductId
+                ? prev.investmentProducts.map((p) =>
+                    p.id === tx.investmentProductId
+                      ? {
+                          ...p,
+                          investedAmount: Math.max(0, p.investedAmount - prodDelta),
+                          marketValue: Math.max(0, p.marketValue - prodDelta),
+                        }
+                      : p
+                  )
+                : prev.investmentProducts,
           }));
           if (authMode === 'supabase' && cloudUserId) {
             getSupabaseBrowserClient()?.from('transactions').delete().eq('id', tx.id).then(() => {});
@@ -317,7 +487,14 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         }
       );
     },
-    [authMode, cloudUserId, commitDataset, dataset.profile.privacyMode, showToast]
+    [
+      authMode,
+      cloudUserId,
+      commitDataset,
+      dataset.investmentProducts,
+      dataset.profile.privacyMode,
+      showToast,
+    ]
   );
 
   const updateTransaction = useCallback(
@@ -366,8 +543,14 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   );
 
   const walletBalances = useMemo(
-    () => calculateWalletBalances(dataset.wallets, dataset.transactions, dataset.valuations),
-    [dataset.wallets, dataset.transactions, dataset.valuations]
+    () =>
+      calculateWalletBalances(
+        dataset.wallets,
+        dataset.transactions,
+        dataset.valuations,
+        dataset.investmentProducts
+      ),
+    [dataset.investmentProducts, dataset.transactions, dataset.valuations, dataset.wallets]
   );
 
   const visibleWalletBalances = useMemo(
@@ -687,10 +870,406 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
           })
           .then(() => {});
       }
-      showToast(`Nilai pasar diperbarui ke ${formatIDR(val.marketValue, dataset.profile.privacyMode)}`);
+      showToast(
+        `Nilai pasar diperbarui ke ${formatIDR(val.marketValue, dataset.profile.privacyMode)}`
+      );
     },
     [authMode, cloudUserId, commitDataset, dataset.profile.privacyMode, showToast]
   );
+
+  // ==================== MUTATIONS — PHASE 2 & 3 ====================
+
+  const addInvestmentProduct = useCallback(
+    (input: Omit<InvestmentProduct, 'id' | 'sortOrder' | 'updatedAt'>) => {
+      const today = todayISO();
+      const prod: InvestmentProduct = {
+        ...input,
+        id: generateUUID(),
+        investedAmount: Math.round(Math.max(0, input.investedAmount)),
+        marketValue: Math.round(Math.max(0, input.marketValue)),
+        updatedAt: today,
+        sortOrder: dataset.investmentProducts.length + 1,
+      };
+      commitDataset((prev) => {
+        const nextProds = [...prev.investmentProducts, prod];
+        const totalMarket = nextProds
+          .filter((p) => p.walletId === prod.walletId)
+          .reduce((s, p) => s + p.marketValue, 0);
+        const nextVals =
+          totalMarket > 0
+            ? [
+                {
+                  id: generateUUID(),
+                  walletId: prod.walletId,
+                  date: today,
+                  marketValue: totalMarket,
+                },
+                ...prev.valuations.filter(
+                  (v) => !(v.walletId === prod.walletId && v.date === today)
+                ),
+              ]
+            : prev.valuations;
+        return { ...prev, investmentProducts: nextProds, valuations: nextVals };
+      });
+      if (authMode === 'supabase' && cloudUserId) {
+        getSupabaseBrowserClient()
+          ?.from('investment_products')
+          .insert(mapProductToDb(prod, cloudUserId))
+          .then(() => {});
+      }
+      showToast(`Produk "${prod.name}" ditambahkan`);
+    },
+    [authMode, cloudUserId, commitDataset, dataset.investmentProducts.length, showToast]
+  );
+
+  const updateInvestmentProduct = useCallback(
+    (prod: InvestmentProduct) => {
+      const today = todayISO();
+      const updated = {
+        ...prod,
+        investedAmount: Math.round(Math.max(0, prod.investedAmount)),
+        marketValue: Math.round(Math.max(0, prod.marketValue)),
+        updatedAt: today,
+      };
+      commitDataset((prev) => {
+        const nextProds = prev.investmentProducts.map((p) => (p.id === updated.id ? updated : p));
+        const totalMarket = nextProds
+          .filter((p) => p.walletId === updated.walletId)
+          .reduce((s, p) => s + p.marketValue, 0);
+        const nextVals =
+          totalMarket > 0
+            ? [
+                {
+                  id: generateUUID(),
+                  walletId: updated.walletId,
+                  date: today,
+                  marketValue: totalMarket,
+                },
+                ...prev.valuations.filter(
+                  (v) => !(v.walletId === updated.walletId && v.date === today)
+                ),
+              ]
+            : prev.valuations;
+        return { ...prev, investmentProducts: nextProds, valuations: nextVals };
+      });
+      if (authMode === 'supabase' && cloudUserId) {
+        getSupabaseBrowserClient()
+          ?.from('investment_products')
+          .update(mapProductToDb(updated, cloudUserId))
+          .eq('id', updated.id)
+          .then(() => {});
+      }
+      showToast(`Produk "${updated.name}" diperbarui`);
+    },
+    [authMode, cloudUserId, commitDataset, showToast]
+  );
+
+  const updateProductMarketValue = useCallback(
+    (productId: string, marketValue: number) => {
+      const target = dataset.investmentProducts.find((p) => p.id === productId);
+      if (!target) return;
+      updateInvestmentProduct({ ...target, marketValue: Math.round(Math.max(0, marketValue)) });
+    },
+    [dataset.investmentProducts, updateInvestmentProduct]
+  );
+
+  const deleteInvestmentProduct = useCallback(
+    (productId: string) => {
+      commitDataset((prev) => ({
+        ...prev,
+        investmentProducts: prev.investmentProducts.filter((p) => p.id !== productId),
+      }));
+      if (authMode === 'supabase' && cloudUserId) {
+        getSupabaseBrowserClient()
+          ?.from('investment_products')
+          .delete()
+          .eq('id', productId)
+          .then(() => {});
+      }
+      showToast('Produk investasi dihapus');
+    },
+    [authMode, cloudUserId, commitDataset, showToast]
+  );
+
+  const addGoalContribution = useCallback(
+    (input: Omit<GoalContribution, 'id'>) => {
+      const contrib: GoalContribution = {
+        ...input,
+        id: generateUUID(),
+        amount: Math.round(Math.max(0, input.amount)),
+      };
+      commitDataset((prev) => ({
+        ...prev,
+        goalContributions: [contrib, ...prev.goalContributions],
+      }));
+      if (authMode === 'supabase' && cloudUserId) {
+        getSupabaseBrowserClient()
+          ?.from('goal_contributions')
+          .insert(mapContributionToDb(contrib, cloudUserId))
+          .then(() => {});
+      }
+      showToast(
+        `Setoran ${contrib.contributorName} (${formatIDR(contrib.amount, dataset.profile.privacyMode)}) dicatat`
+      );
+    },
+    [authMode, cloudUserId, commitDataset, dataset.profile.privacyMode, showToast]
+  );
+
+  const deleteGoalContribution = useCallback(
+    (contribId: string) => {
+      commitDataset((prev) => ({
+        ...prev,
+        goalContributions: prev.goalContributions.filter((c) => c.id !== contribId),
+      }));
+      if (authMode === 'supabase' && cloudUserId) {
+        getSupabaseBrowserClient()
+          ?.from('goal_contributions')
+          .delete()
+          .eq('id', contribId)
+          .then(() => {});
+      }
+      showToast('Catatan kontribusi dihapus');
+    },
+    [authMode, cloudUserId, commitDataset, showToast]
+  );
+
+  const saveGoalInvite = useCallback(
+    (invite: GoalInvite) => {
+      commitDataset((prev) => {
+        const exists = prev.goalInvites.some((i) => i.goalId === invite.goalId);
+        return {
+          ...prev,
+          goalInvites: exists
+            ? prev.goalInvites.map((i) => (i.goalId === invite.goalId ? invite : i))
+            : [...prev.goalInvites, invite],
+        };
+      });
+      if (authMode === 'supabase' && cloudUserId) {
+        getSupabaseBrowserClient()
+          ?.from('goal_invites')
+          .upsert(mapInviteToDb(invite, cloudUserId))
+          .then(() => {});
+      }
+      showToast('Pengaturan berbagi pasangan disimpan');
+    },
+    [authMode, cloudUserId, commitDataset, showToast]
+  );
+
+  const addRecurringRule = useCallback(
+    (input: Omit<RecurringRule, 'id'>) => {
+      const rule: RecurringRule = {
+        ...input,
+        id: generateUUID(),
+        amount: Math.round(Math.max(0, input.amount)),
+      };
+      commitDataset((prev) => ({
+        ...prev,
+        recurringRules: [...prev.recurringRules, rule],
+      }));
+      if (authMode === 'supabase' && cloudUserId) {
+        getSupabaseBrowserClient()
+          ?.from('recurring_rules')
+          .insert(mapRecurringToDb(rule, cloudUserId))
+          .then(() => {});
+      }
+      showToast(`Jadwal rutin "${rule.label}" ditambahkan`);
+    },
+    [authMode, cloudUserId, commitDataset, showToast]
+  );
+
+  const toggleRecurringRule = useCallback(
+    (ruleId: string) => {
+      const target = dataset.recurringRules.find((r) => r.id === ruleId);
+      if (!target) return;
+      const nextActive = !target.active;
+      commitDataset((prev) => ({
+        ...prev,
+        recurringRules: prev.recurringRules.map((r) =>
+          r.id === ruleId ? { ...r, active: nextActive } : r
+        ),
+      }));
+      if (authMode === 'supabase' && cloudUserId) {
+        getSupabaseBrowserClient()
+          ?.from('recurring_rules')
+          .update({ active: nextActive })
+          .eq('id', ruleId)
+          .then(() => {});
+      }
+    },
+    [authMode, cloudUserId, commitDataset, dataset.recurringRules]
+  );
+
+  const deleteRecurringRule = useCallback(
+    (ruleId: string) => {
+      commitDataset((prev) => ({
+        ...prev,
+        recurringRules: prev.recurringRules.filter((r) => r.id !== ruleId),
+      }));
+      if (authMode === 'supabase' && cloudUserId) {
+        getSupabaseBrowserClient()
+          ?.from('recurring_rules')
+          .delete()
+          .eq('id', ruleId)
+          .then(() => {});
+      }
+      showToast('Jadwal berulang dihapus');
+    },
+    [authMode, cloudUserId, commitDataset, showToast]
+  );
+
+  const executeRecurringRule = useCallback(
+    (ruleId: string) => {
+      const rule = dataset.recurringRules.find((r) => r.id === ruleId);
+      if (!rule) return;
+      addTransaction({
+        date: todayISO(),
+        type: rule.type,
+        amount: rule.amount,
+        fee: 0,
+        subcategoryId: rule.subcategoryId,
+        walletId: rule.walletId,
+        toWalletId: rule.toWalletId,
+        goalId: rule.goalId,
+        investmentProductId: rule.investmentProductId ?? null,
+        note: rule.note || rule.label,
+      });
+      const nextRun = advanceRecurringDate(todayISO(), rule.frequency, rule.dayOfMonth);
+      commitDataset((prev) => ({
+        ...prev,
+        recurringRules: prev.recurringRules.map((r) =>
+          r.id === ruleId ? { ...r, nextRun } : r
+        ),
+      }));
+      if (authMode === 'supabase' && cloudUserId) {
+        getSupabaseBrowserClient()
+          ?.from('recurring_rules')
+          .update({ next_run: nextRun })
+          .eq('id', ruleId)
+          .then(() => {});
+      }
+    },
+    [addTransaction, authMode, cloudUserId, commitDataset, dataset.recurringRules]
+  );
+
+  const recordAIFeedback = useCallback(
+    (topic: string, vote: 'up' | 'down', note = '') => {
+      const entry = {
+        id: generateUUID(),
+        topic,
+        vote,
+        note: note || (vote === 'up' ? `Suka saran topik ${topic}` : `Kurangi saran topik ${topic}`),
+        createdAt: new Date().toISOString(),
+      };
+      commitDataset((prev) => {
+        const nextPatterns =
+          vote === 'up'
+            ? Array.from(new Set([...prev.aiMemory.patterns, `Menyukai insight detail tentang ${topic}`])).slice(-8)
+            : Array.from(new Set([...prev.aiMemory.patterns, `Kurang tertarik saran berulang soal ${topic}`])).slice(-8);
+        const nextMem = {
+          ...prev.aiMemory,
+          patterns: nextPatterns,
+          feedbackLog: [entry, ...prev.aiMemory.feedbackLog].slice(0, 30),
+        };
+        if (authMode === 'supabase' && cloudUserId) {
+          getSupabaseBrowserClient()
+            ?.from('ai_memory')
+            .upsert({
+              owner_id: cloudUserId,
+              patterns: nextMem.patterns,
+              preferences: nextMem.preferences,
+              feedback_log: nextMem.feedbackLog,
+              updated_at: new Date().toISOString(),
+            })
+            .then(() => {});
+        }
+        return { ...prev, aiMemory: nextMem };
+      });
+      showToast(vote === 'up' ? '👍 Disimpan ke AI Memory' : '👎 Preferensi disimpan ke AI Memory');
+    },
+    [authMode, cloudUserId, commitDataset, showToast]
+  );
+
+  const clearAIMemory = useCallback(() => {
+    commitDataset((prev) => ({
+      ...prev,
+      aiMemory: { patterns: [], preferences: {}, feedbackLog: [] },
+    }));
+    if (authMode === 'supabase' && cloudUserId) {
+      getSupabaseBrowserClient()
+        ?.from('ai_memory')
+        .upsert({
+          owner_id: cloudUserId,
+          patterns: [],
+          preferences: {},
+          feedback_log: [],
+          updated_at: new Date().toISOString(),
+        })
+        .then(() => {});
+    }
+    showToast('AI Memory dibersihkan');
+  }, [authMode, cloudUserId, commitDataset, showToast]);
+
+  const updateSheetsSync = useCallback(
+    (partial: Partial<SheetsSyncConfig>) => {
+      commitDataset((prev) => {
+        const next = { ...prev.sheetsSync, ...partial };
+        if (authMode === 'supabase' && cloudUserId) {
+          getSupabaseBrowserClient()
+            ?.from('sheets_sync')
+            .upsert({
+              owner_id: cloudUserId,
+              spreadsheet_id: next.spreadsheetId,
+              spreadsheet_url: next.spreadsheetUrl,
+              auto_sync: next.autoSync,
+              last_synced_at: next.lastSyncedAt,
+              status: next.status,
+            })
+            .then(() => {});
+        }
+        return { ...prev, sheetsSync: next };
+      });
+    },
+    [authMode, cloudUserId, commitDataset]
+  );
+
+  const triggerSheetsSync = useCallback(async (): Promise<{ ok: boolean; message: string }> => {
+    try {
+      const res = await fetch('/api/sheets/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          webhookUrl: dataset.sheetsSync.spreadsheetUrl,
+          dataset,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        return { ok: false, message: json.error || 'Gagal sinkron ke Google Sheets.' };
+      }
+      const syncedAt = json.syncedAt || new Date().toISOString();
+      updateSheetsSync({
+        status: json.synced ? 'connected' : dataset.sheetsSync.status,
+        lastSyncedAt: syncedAt,
+      });
+      showToast(json.message || 'Sinkron Google Sheets selesai');
+      return { ok: true, message: json.message };
+    } catch {
+      return { ok: false, message: 'Gagal terhubung ke endpoint sinkronisasi.' };
+    }
+  }, [dataset, showToast, updateSheetsSync]);
+
+  const loadThreeMonthDummyData = useCallback(() => {
+    commitDataset((prev) => applyThreeMonthDummyData(prev, new Date()));
+    showToast('🧪 Data dummy 3 bulan dimuat (bisa dihapus 1-klik kapan saja)');
+  }, [commitDataset, showToast]);
+
+  const removeDummyData = useCallback(() => {
+    commitDataset((prev) => clearDummyData(prev, new Date()));
+    setPeriod('this_month');
+    showToast('🧹 Data dummy dihapus — mulai bersih dari 0');
+  }, [commitDataset, showToast]);
+
+  // ==================== PROFILE ====================
 
   const syncProfileField = useCallback(
     (fields: Record<string, unknown>) => {
@@ -781,6 +1360,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   const value: WalletContextValue = {
     loading,
+    nowDate: clientNow ?? SSR_FALLBACK_DATE,
     authMode,
     supabaseConfigured,
     dataset,
@@ -800,6 +1380,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     toast,
     dismissToast: () => setToast(null),
     signInWithGoogle,
+    signInWithEmail,
+    signUpWithEmail,
     continueLocalMode,
     signOut,
     addTransaction,
@@ -823,6 +1405,23 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     completeOnboarding,
     reopenOnboarding,
     resetLocalData,
+    addInvestmentProduct,
+    updateInvestmentProduct,
+    updateProductMarketValue,
+    deleteInvestmentProduct,
+    addGoalContribution,
+    deleteGoalContribution,
+    saveGoalInvite,
+    addRecurringRule,
+    toggleRecurringRule,
+    deleteRecurringRule,
+    executeRecurringRule,
+    recordAIFeedback,
+    clearAIMemory,
+    updateSheetsSync,
+    triggerSheetsSync,
+    loadThreeMonthDummyData,
+    removeDummyData,
   };
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;

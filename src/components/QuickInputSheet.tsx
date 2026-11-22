@@ -204,6 +204,9 @@ function QuickInputSheetInner() {
   );
   const [date, setDate] = useState<string>(() => editTx?.date ?? today);
   const [note, setNote] = useState<string>(() => editTx?.note ?? '');
+  const [investmentProductId, setInvestmentProductId] = useState<string | null>(
+    () => editTx?.investmentProductId ?? quickInputPreset?.investmentProductId ?? null
+  );
   const [subModal, setSubModal] = useState<SubModal>(null);
   const [catQuery, setCatQuery] = useState('');
   const [walletQuery, setWalletQuery] = useState('');
@@ -239,11 +242,32 @@ function QuickInputSheetInner() {
   const fromWallet = visibleWallets.find((w) => w.id === walletId) ?? visibleWallets[0];
   const toWallet = visibleWallets.find((w) => w.id === toWalletId) ?? visibleWallets[1] ?? visibleWallets[0];
 
+  const matchingInvestmentProducts = useMemo(() => {
+    const invWalletId =
+      tab === 'saving'
+        ? savingDirection === 'saving'
+          ? toWallet?.group === 'investment'
+            ? toWallet.id
+            : null
+          : fromWallet?.group === 'investment'
+            ? fromWallet.id
+            : null
+        : null;
+    if (!invWalletId) return [];
+    return dataset.investmentProducts.filter((p) => p.walletId === invWalletId);
+  }, [dataset.investmentProducts, fromWallet, savingDirection, tab, toWallet]);
+
   const handleSave = useCallback(() => {
     const amount = parsedAmount.value;
     if (amount <= 0 || !fromWallet) return;
 
     const txType: TransactionType = tab === 'saving' ? savingDirection : tab;
+    const validProductId =
+      tab === 'saving' &&
+      investmentProductId &&
+      matchingInvestmentProducts.some((p) => p.id === investmentProductId)
+        ? investmentProductId
+        : null;
 
     const payload = {
       date,
@@ -254,6 +278,7 @@ function QuickInputSheetInner() {
       amount,
       fee: tab === 'transfer' ? fee : 0,
       goalId: tab === 'saving' ? goalId : null,
+      investmentProductId: validProductId,
       note: note.trim(),
     };
 
@@ -274,7 +299,9 @@ function QuickInputSheetInner() {
     fee,
     fromWallet,
     goalId,
+    investmentProductId,
     isEdit,
+    matchingInvestmentProducts,
     note,
     parsedAmount.value,
     savingDirection,
@@ -1364,6 +1391,33 @@ function QuickInputSheetInner() {
                 </div>
                 <span className="text-xs text-[var(--mw-text-muted)] shrink-0">Ubah</span>
               </button>
+              {matchingInvestmentProducts.length > 0 && (
+                <div className="p-2.5 rounded-xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)] space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between text-[var(--mw-text-dim)]">
+                    <span>Produk Bibit (otomatis update modal &amp; nilai pasar):</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {matchingInvestmentProducts.map((p) => {
+                      const active = investmentProductId === p.id;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setInvestmentProductId(active ? null : p.id)}
+                          className="px-2.5 py-1 rounded-lg border font-medium cursor-pointer transition"
+                          style={{
+                            background: active ? `${p.color}22` : 'var(--mw-surface)',
+                            borderColor: active ? p.color : 'var(--mw-border)',
+                            color: active ? p.color : 'var(--mw-text-muted)',
+                          }}
+                        >
+                          {p.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <div className="grid grid-cols-2 gap-2">

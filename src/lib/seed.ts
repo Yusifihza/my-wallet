@@ -2,6 +2,8 @@ import type {
   AppDataset,
   Category,
   Goal,
+  InvestmentAssetClass,
+  InvestmentProduct,
   QuickTemplate,
   Subcategory,
   Wallet,
@@ -24,6 +26,39 @@ export const WALLET_GROUP_ORDER: WalletGroup[] = [
   'emoney',
   'investment',
   'credit',
+];
+
+export const INVESTMENT_ASSET_LABELS: Record<InvestmentAssetClass, string> = {
+  pu: 'Pasar Uang (PU)',
+  obligasi: 'Obligasi',
+  reksa_saham: 'Reksa Saham',
+  saham: 'Saham',
+  sbn: 'SBN (ORI/SBR/ST)',
+  emas: 'Emas',
+  campuran: 'Reksa Campuran',
+  lainnya: 'Produk Lainnya',
+};
+
+export const INVESTMENT_ASSET_COLORS: Record<InvestmentAssetClass, string> = {
+  pu: '#10b981',
+  obligasi: '#0d9488',
+  reksa_saham: '#38bdf8',
+  saham: '#f59e0b',
+  sbn: '#0284c7',
+  emas: '#eab308',
+  campuran: '#14b8a6',
+  lainnya: '#64748b',
+};
+
+export const INVESTMENT_ASSET_ORDER: InvestmentAssetClass[] = [
+  'pu',
+  'obligasi',
+  'reksa_saham',
+  'saham',
+  'sbn',
+  'emas',
+  'campuran',
+  'lainnya',
 ];
 
 export function todayISO(): string {
@@ -619,6 +654,71 @@ export function createSeedTemplates(): QuickTemplate[] {
   ];
 }
 
+export function createSeedInvestmentProducts(openingDate = '2026-01-01'): InvestmentProduct[] {
+  return [
+    {
+      id: 'prod_bibit_pu',
+      walletId: 'w_bibit',
+      goalId: 'goal_wedding',
+      name: 'Pasar Uang (PU)',
+      assetClass: 'pu',
+      investedAmount: 0,
+      marketValue: 0,
+      color: INVESTMENT_ASSET_COLORS.pu,
+      updatedAt: openingDate,
+      sortOrder: 1,
+    },
+    {
+      id: 'prod_bibit_obligasi',
+      walletId: 'w_bibit',
+      goalId: 'goal_wedding',
+      name: 'Obligasi',
+      assetClass: 'obligasi',
+      investedAmount: 0,
+      marketValue: 0,
+      color: INVESTMENT_ASSET_COLORS.obligasi,
+      updatedAt: openingDate,
+      sortOrder: 2,
+    },
+    {
+      id: 'prod_bibit_reksa_saham',
+      walletId: 'w_bibit',
+      goalId: 'goal_wedding',
+      name: 'Reksa Saham',
+      assetClass: 'reksa_saham',
+      investedAmount: 0,
+      marketValue: 0,
+      color: INVESTMENT_ASSET_COLORS.reksa_saham,
+      updatedAt: openingDate,
+      sortOrder: 3,
+    },
+    {
+      id: 'prod_bibit_saham',
+      walletId: 'w_bibit',
+      goalId: 'goal_wedding',
+      name: 'Saham',
+      assetClass: 'saham',
+      investedAmount: 0,
+      marketValue: 0,
+      color: INVESTMENT_ASSET_COLORS.saham,
+      updatedAt: openingDate,
+      sortOrder: 4,
+    },
+    {
+      id: 'prod_bibit_sbn',
+      walletId: 'w_bibit',
+      goalId: 'goal_wedding',
+      name: 'SBN',
+      assetClass: 'sbn',
+      investedAmount: 0,
+      marketValue: 0,
+      color: INVESTMENT_ASSET_COLORS.sbn,
+      updatedAt: openingDate,
+      sortOrder: 5,
+    },
+  ];
+}
+
 export function createInitialDataset(displayName = 'Kamu', openingDate = '2026-01-01'): AppDataset {
   const { categories, subcategories } = createSeedCategories();
   return {
@@ -630,6 +730,7 @@ export function createInitialDataset(displayName = 'Kamu', openingDate = '2026-0
       theme: 'dark',
       privacyMode: false,
       onboardingCompleted: false,
+      isDemoData: false,
     },
     wallets: createSeedWallets(openingDate),
     categories,
@@ -637,6 +738,31 @@ export function createInitialDataset(displayName = 'Kamu', openingDate = '2026-0
     goals: createSeedGoals(),
     transactions: [],
     valuations: [],
+    investmentProducts: createSeedInvestmentProducts(openingDate),
+    goalContributions: [],
+    goalInvites: [
+      {
+        goalId: 'goal_wedding',
+        code: 'MW-WED-2027',
+        partnerName: 'Pasangan',
+        partnerEmail: '',
+        sharePercent: 50,
+        status: 'pending',
+      },
+    ],
+    recurringRules: [],
+    aiMemory: {
+      patterns: [],
+      preferences: {},
+      feedbackLog: [],
+    },
+    sheetsSync: {
+      status: 'disconnected',
+      spreadsheetId: '',
+      spreadsheetUrl: '',
+      autoSync: false,
+      lastSyncedAt: null,
+    },
     templates: createSeedTemplates(),
   };
 }

@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { answerFinancialQuestion, generateFinancialInsights } from '@/lib/advisor';
+import { applyThreeMonthDummyData, clearDummyData } from '@/lib/dummyData';
 import {
+  buildDailyExpenseHeatmap,
   buildPeriodOptions,
   calculateCategoryBudgets,
   calculateGoalProgress,
+  calculateMoMComparison,
   calculateNetWorth,
   calculatePeriodSummary,
   calculateWalletBalances,
@@ -11,7 +15,12 @@ import {
   getPeriodRange,
   parseAmountExpression,
 } from '@/lib/finance';
-import { createSeedCategories, createSeedGoals, createSeedWallets } from '@/lib/seed';
+import {
+  createInitialDataset,
+  createSeedCategories,
+  createSeedGoals,
+  createSeedWallets,
+} from '@/lib/seed';
 import type { Transaction, WalletValuation } from '@/types/finance';
 
 describe('parseAmountExpression', () => {
@@ -293,4 +302,89 @@ describe('6-Month Rolling Period Selector & Income Budgets', () => {
     expect(pemasukan.status).toBe('safe');
   });
 });
+
+describe('Phase 2 & 3: Bibit Multi-Product, Shared Wedding Goal, Dummy Data, Analytics & AI Advisor', () => {
+  it('generates 3-month dummy data with 5 Bibit products and cleanly removes it back to 0', () => {
+    const ref = new Date(2026, 10, 21); // Nov 21, 2026
+    const fresh = createInitialDataset('Iza', '2026-11-21');
+    const demo = applyThreeMonthDummyData(fresh, ref);
+
+    expect(demo.profile.isDemoData).toBe(true);
+    expect(demo.transactions.length).toBeGreaterThan(50);
+    expect(demo.investmentProducts.map((p) => p.assetClass)).toEqual([
+      'pu',
+      'obligasi',
+      'reksa_saham',
+      'saham',
+      'sbn',
+    ]);
+    expect(demo.goalContributions.length).toBe(3);
+    expect(demo.recurringRules.length).toBe(5);
+
+    // Bibit balance aggregates all 5 products: Modal 14.000.000, Market 14.533.000 (+533.000)
+    const bals = calculateWalletBalances(
+      demo.wallets,
+      demo.transactions,
+      demo.valuations,
+      demo.investmentProducts
+    );
+    const bibit = bals.find((b) => b.wallet.id === 'w_bibit')!;
+    expect(bibit.costBasis).toBe(14000000);
+    expect(bibit.balance).toBe(14533000);
+    expect(bibit.unrealizedGain).toBe(533000);
+
+    // Clear dummy data back to 0 cleanly
+    const cleaned = clearDummyData(demo, ref);
+    expect(cleaned.profile.isDemoData).toBe(false);
+    expect(cleaned.transactions.length).toBe(0);
+    expect(cleaned.goalContributions.length).toBe(0);
+    expect(cleaned.recurringRules.length).toBe(0);
+    expect(cleaned.investmentProducts.every((p) => p.investedAmount === 0 && p.marketValue === 0)).toBe(true);
+  });
+
+  it('computes Shared Wedding Goal progress combining Bibit products + partner contributions without double-counting', () => {
+    const ref = new Date(2026, 10, 21);
+    const demo = applyThreeMonthDummyData(createInitialDataset('Iza', '2026-11-21'), ref);
+    const wedding = demo.goals.find((g) => g.id === 'goal_wedding')!;
+
+    const prog = calculateGoalProgress(
+      wedding,
+      demo.transactions,
+      ref,
+      demo.goalContributions,
+      demo.investmentProducts
+    );
+    // All 5 Bibit Wedding products sum to 14.533.000 (product-linked saving txs NOT double-counted)
+    expect(prog.mySaved).toBe(14533000);
+    // Partner contributions: 4.5jt + 1.25jt + 1.5jt = 7.250.000
+    expect(prog.partnerSaved).toBe(7250000);
+    expect(prog.saved).toBe(21783000);
+    expect(prog.linkedProducts.length).toBe(5);
+  });
+
+  it('computes MoM comparison, 84-day expense heatmap, and AI Advisor insights', () => {
+    const ref = new Date(2026, 10, 21);
+    const demo = applyThreeMonthDummyData(createInitialDataset('Iza', '2026-11-21'), ref);
+
+    const mom = calculateMoMComparison(demo.transactions, demo.categories, demo.subcategories, ref);
+    expect(mom.income.current).toBeGreaterThan(0);
+    expect(mom.expense.previous).toBeGreaterThan(0);
+    expect(mom.categoryChanges.length).toBeGreaterThan(0);
+
+    const heat = buildDailyExpenseHeatmap(demo.transactions, 84, ref);
+    expect(heat.length).toBe(84);
+    expect(heat.some((d) => d.level >= 3)).toBe(true);
+
+    const report = generateFinancialInsights(demo, ref);
+    expect(report.score).toBeGreaterThan(40);
+    expect(report.cards.some((c) => c.topic === 'bibit')).toBe(true);
+    expect(report.cards.some((c) => c.topic === 'wedding')).toBe(true);
+
+    const bibitAns = answerFinancialQuestion('Evaluasi portofolio Bibit PU Obligasi SBN', demo, ref);
+    expect(bibitAns.topic).toBe('bibit');
+    expect(bibitAns.answer).toContain('Pasar Uang');
+    expect(bibitAns.answer).toContain('SBN');
+  });
+});
+
 

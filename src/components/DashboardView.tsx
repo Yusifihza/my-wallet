@@ -8,8 +8,10 @@ import {
   ArrowUpRight,
   ChevronLeft,
   ChevronRight,
+  FlaskConical,
   PiggyBank,
   Plus,
+  Sparkles,
   TrendingUp,
 } from 'lucide-react';
 import {
@@ -25,6 +27,7 @@ import {
 } from 'recharts';
 import { DynamicIcon } from '@/components/IconMap';
 import { useWallet } from '@/context/WalletContext';
+import { generateFinancialInsights } from '@/lib/advisor';
 import {
   buildMonthlyTrend,
   calculateCategoryBudgets,
@@ -38,12 +41,14 @@ import { todayISO } from '@/lib/seed';
 export function DashboardView() {
   const {
     dataset,
+    nowDate,
     periodLabel,
     periodTransactions,
     periodSummary,
     visibleWalletBalances,
     netWorth,
     openQuickInput,
+    loadThreeMonthDummyData,
   } = useWallet();
 
   const privacy = dataset.profile.privacyMode;
@@ -52,9 +57,16 @@ export function DashboardView() {
   // Donut drill-down state: null = top-level categories, string = specific categoryId
   const [drillCatId, setDrillCatId] = useState<string | null>(null);
 
+  const bibitSummary = useMemo(
+    () => visibleWalletBalances.find((b) => b.wallet.group === 'investment') ?? null,
+    [visibleWalletBalances]
+  );
+
+  const aiReport = useMemo(() => generateFinancialInsights(dataset, nowDate), [dataset, nowDate]);
+
   const monthlyTrend = useMemo(
-    () => buildMonthlyTrend(dataset.transactions, 6),
-    [dataset.transactions]
+    () => buildMonthlyTrend(dataset.transactions, 6, nowDate),
+    [dataset.transactions, nowDate]
   );
 
   const expenseBudgets = useMemo(
@@ -169,6 +181,55 @@ export function DashboardView() {
         </div>
       </div>
 
+      {/* AI Advisor Quick Highlight Strip (or 1-Click Dummy Data Starter when empty) */}
+      {dataset.transactions.length === 0 ? (
+        <div className="mw-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="w-8 h-8 rounded-xl bg-[var(--mw-primary-soft)] text-[var(--mw-primary)] flex items-center justify-center shrink-0">
+              <FlaskConical className="w-4 h-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="font-semibold text-[var(--mw-text)]">
+                Ingin lihat grafik MoM, Heatmap, Portofolio Bibit 5 Produk, &amp; AI Advisor langsung hidup?
+              </div>
+              <div className="text-[var(--mw-text-muted)]">
+                Coba muat Data Dummy 3 Bulan — bisa dihapus kembali ke 0 dalam 1 klik kapan saja.
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={loadThreeMonthDummyData}
+            className="px-3.5 py-2 rounded-xl font-semibold text-white shrink-0 cursor-pointer"
+            style={{ background: 'var(--mw-primary)' }}
+          >
+            🧪 Muat Data Dummy 3 Bulan
+          </button>
+        </div>
+      ) : (
+        <Link
+          href="/advisor"
+          className="mw-card rounded-2xl p-3.5 flex items-center justify-between gap-3 hover:border-[var(--mw-primary)] transition text-xs"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="w-8 h-8 rounded-xl bg-[var(--mw-primary-soft)] text-[var(--mw-primary)] flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="font-semibold text-[var(--mw-text)] truncate">
+                AI Advisor · Skor {aiReport.score}/100 ({aiReport.scoreLabel})
+              </div>
+              <div className="text-[var(--mw-text-muted)] truncate">
+                {aiReport.cards[0]?.title || aiReport.headline}
+              </div>
+            </div>
+          </div>
+          <span className="text-[var(--mw-primary)] font-semibold shrink-0 inline-flex items-center gap-0.5">
+            Tanya AI <ChevronRight className="w-3.5 h-3.5" />
+          </span>
+        </Link>
+      )}
+
       {/* Top Row: Net Worth Hero + 4 KPI Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Hero Net Worth Card */}
@@ -189,12 +250,20 @@ export function DashboardView() {
                 {formatIDR(netWorth.liquid, privacy)}
               </div>
             </div>
-            <div>
-              <div className="text-xs text-emerald-100/75">Investasi (Bibit)</div>
-              <div className="text-base font-bold tab-num mt-0.5">
+            <Link href="/wallets" className="group">
+              <div className="text-xs text-emerald-100/75 flex items-center gap-1.5">
+                <span>Investasi (Bibit)</span>
+                {bibitSummary && bibitSummary.unrealizedGainPct !== null && (
+                  <span className="px-1.5 py-0.5 rounded bg-white/15 text-[10px] font-bold">
+                    {bibitSummary.unrealizedGain >= 0 ? '+' : ''}
+                    {bibitSummary.unrealizedGainPct.toFixed(1).replace('.', ',')}%
+                  </span>
+                )}
+              </div>
+              <div className="text-base font-bold tab-num mt-0.5 group-hover:underline">
                 {formatIDR(netWorth.investment, privacy)}
               </div>
-            </div>
+            </Link>
           </div>
         </div>
 
@@ -558,7 +627,13 @@ export function DashboardView() {
           </div>
           <div className="space-y-3">
             {dataset.goals.slice(0, 3).map((g) => {
-              const prog = calculateGoalProgress(g, dataset.transactions);
+              const prog = calculateGoalProgress(
+                g,
+                dataset.transactions,
+                nowDate,
+                dataset.goalContributions,
+                dataset.investmentProducts
+              );
               return (
                 <div key={g.id} className="p-3 rounded-xl bg-[var(--mw-surface-2)] space-y-2">
                   <div className="flex items-center justify-between gap-2">

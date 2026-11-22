@@ -1,9 +1,13 @@
 import type {
+  AppDataset,
   Category,
   CategoryBudgetStatus,
   Goal,
+  GoalContribution,
+  InvestmentProduct,
   PeriodPreset,
   PeriodSummary,
+  RecurringRule,
   Subcategory,
   Transaction,
   Wallet,
@@ -175,7 +179,8 @@ export function parseAmountExpression(raw: string): ParsedAmount {
 export function calculateWalletBalances(
   wallets: Wallet[],
   transactions: Transaction[],
-  valuations: WalletValuation[] = []
+  valuations: WalletValuation[] = [],
+  investmentProducts: InvestmentProduct[] = []
 ): WalletBalanceSummary[] {
   const deltaMap = new Map<string, number>();
   for (const w of wallets) {
@@ -209,9 +214,33 @@ export function calculateWalletBalances(
   }
 
   return wallets.map((wallet) => {
-    const costBasis = wallet.openingBalance + (deltaMap.get(wallet.id) ?? 0);
+    const txCostBasis = wallet.openingBalance + (deltaMap.get(wallet.id) ?? 0);
 
-    // Check investment valuations
+    // Check multi-product investment holdings (e.g. Bibit: PU, Obligasi, Reksa Saham, Saham, SBN)
+    if (wallet.group === 'investment') {
+      const products = investmentProducts.filter((p) => p.walletId === wallet.id);
+      const hasActiveProducts = products.some((p) => p.investedAmount > 0 || p.marketValue > 0);
+      if (hasActiveProducts) {
+        const prodInvested = products.reduce((s, p) => s + Math.max(0, p.investedAmount), 0);
+        const prodMarket = products.reduce((s, p) => s + Math.max(0, p.marketValue), 0);
+        const latestDate = products.reduce<string | null>(
+          (max, p) => (!max || p.updatedAt > max ? p.updatedAt : max),
+          null
+        );
+        const unrealizedGain = prodMarket - prodInvested;
+        const unrealizedGainPct = prodInvested > 0 ? (unrealizedGain / prodInvested) * 100 : null;
+        return {
+          wallet,
+          costBasis: prodInvested,
+          balance: prodMarket,
+          unrealizedGain,
+          unrealizedGainPct,
+          lastValuationDate: latestDate,
+        };
+      }
+    }
+
+    // Fallback: single-wallet valuation snapshot
     const walletVals = valuations
       .filter((v) => v.walletId === wallet.id)
       .sort((a, b) => b.date.localeCompare(a.date));
@@ -230,11 +259,11 @@ export function calculateWalletBalances(
         }
       }
       const balance = latest.marketValue + postSnapshotFlows;
-      const unrealizedGain = balance - costBasis;
-      const unrealizedGainPct = costBasis > 0 ? (unrealizedGain / costBasis) * 100 : null;
+      const unrealizedGain = balance - txCostBasis;
+      const unrealizedGainPct = txCostBasis > 0 ? (unrealizedGain / txCostBasis) * 100 : null;
       return {
         wallet,
-        costBasis,
+        costBasis: txCostBasis,
         balance,
         unrealizedGain,
         unrealizedGainPct,
@@ -244,8 +273,8 @@ export function calculateWalletBalances(
 
     return {
       wallet,
-      costBasis,
-      balance: costBasis,
+      costBasis: txCostBasis,
+      balance: txCostBasis,
       unrealizedGain: 0,
       unrealizedGainPct: null,
       lastValuationDate: null,
@@ -597,15 +626,35 @@ export function calculateZeroBasedAllocation(
 export function calculateGoalProgress(
   goal: Goal,
   transactions: Transaction[],
-  referenceDate = new Date()
+  referenceDate = new Date(),
+  contributions: GoalContribution[] = [],
+  investmentProducts: InvestmentProduct[] = []
 ) {
-  let saved = 0;
+  const linkedProducts = investmentProducts.filter((p) => p.goalId === goal.id);
+  const linkedProductIds = new Set(linkedProducts.map((p) => p.id));
+  const productMarketTotal = linkedProducts.reduce((s, p) => s + Math.max(0, p.marketValue), 0);
+  const productInvestedTotal = linkedProducts.reduce((s, p) => s + Math.max(0, p.investedAmount), 0);
+  const hasActiveProducts = productMarketTotal > 0 || productInvestedTotal > 0;
+
+  let txSaved = 0;
   for (const tx of transactions) {
     if (tx.goalId !== goal.id) continue;
-    if (tx.type === 'saving') saved += tx.amount;
-    else if (tx.type === 'saving_withdrawal') saved -= tx.amount;
+    // Avoid double-counting deposits already tracked in linked investment product values
+    if (hasActiveProducts && tx.investmentProductId && linkedProductIds.has(tx.investmentProductId)) {
+      continue;
+    }
+    if (tx.type === 'saving') txSaved += tx.amount;
+    else if (tx.type === 'saving_withdrawal') txSaved -= tx.amount;
   }
-  saved = Math.max(0, saved);
+
+  const mySaved = Math.max(0, txSaved + productMarketTotal);
+  const partnerSaved = Math.max(
+    0,
+    contributions
+      .filter((c) => c.goalId === goal.id && c.isPartner)
+      .reduce((s, c) => s + c.amount, 0)
+  );
+  const saved = mySaved + partnerSaved;
 
   const pct = goal.targetAmount > 0 ? Math.min(100, Math.round((saved / goal.targetAmount) * 100)) : 0;
   const remaining = Math.max(0, goal.targetAmount - saved);
@@ -619,7 +668,18 @@ export function calculateGoalProgress(
     requiredPerMonth = remaining > 0 ? Math.ceil(remaining / monthsLeft) : 0;
   }
 
-  return { saved, pct, remaining, monthsLeft, requiredPerMonth };
+  return {
+    saved,
+    mySaved,
+    partnerSaved,
+    myInvested: productInvestedTotal,
+    myMarketGain: productMarketTotal - productInvestedTotal,
+    linkedProducts,
+    pct,
+    remaining,
+    monthsLeft,
+    requiredPerMonth,
+  };
 }
 
 // ==================== MONTHLY SERIES & WALLET HISTORY ====================
@@ -708,3 +768,355 @@ export function transactionsToCSV(
 
   return [header.join(','), ...rows].join('\n');
 }
+
+// ==================== PHASE 2 ANALYTICS: MoM, YoY, HEATMAP, BIBIT CHART ====================
+
+export interface MoMDelta {
+  current: number;
+  previous: number;
+  diff: number;
+  pct: number | null;
+}
+
+export interface CategoryMoMChange {
+  categoryId: string;
+  categoryName: string;
+  color: string;
+  current: number;
+  previous: number;
+  diff: number;
+  pct: number | null;
+}
+
+export function calculateMoMComparison(
+  transactions: Transaction[],
+  categories: Category[],
+  subcategories: Subcategory[],
+  referenceDate = new Date()
+) {
+  const curRange = getPeriodRange('this_month', referenceDate);
+  const prevRange = getPeriodRange('last_month', referenceDate);
+  const curTx = filterTransactionsByRange(transactions, curRange.start, curRange.end);
+  const prevTx = filterTransactionsByRange(transactions, prevRange.start, prevRange.end);
+  const curSum = calculatePeriodSummary(curTx);
+  const prevSum = calculatePeriodSummary(prevTx);
+
+  const delta = (c: number, p: number): MoMDelta => ({
+    current: c,
+    previous: p,
+    diff: c - p,
+    pct: p > 0 ? Math.round(((c - p) / p) * 1000) / 10 : null,
+  });
+
+  const curBud = calculateCategoryBudgets(categories, subcategories, curTx, 'expense').items;
+  const prevBud = calculateCategoryBudgets(categories, subcategories, prevTx, 'expense').items;
+  const prevMap = new Map(prevBud.map((x) => [x.category.id, x.actual]));
+
+  const categoryChanges: CategoryMoMChange[] = curBud
+    .map((x) => {
+      const prev = prevMap.get(x.category.id) ?? 0;
+      const diff = x.actual - prev;
+      return {
+        categoryId: x.category.id,
+        categoryName: x.category.name,
+        color: x.category.color,
+        current: x.actual,
+        previous: prev,
+        diff,
+        pct: prev > 0 ? Math.round((diff / prev) * 1000) / 10 : null,
+      };
+    })
+    .filter((c) => c.current > 0 || c.previous > 0)
+    .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+
+  return {
+    currentLabel: curRange.label,
+    previousLabel: prevRange.label,
+    income: delta(curSum.income, prevSum.income),
+    expense: delta(curSum.expense, prevSum.expense),
+    saving: delta(Math.max(0, curSum.savingNet), Math.max(0, prevSum.savingNet)),
+    netCashflow: delta(curSum.netCashflow, prevSum.netCashflow),
+    categoryChanges,
+  };
+}
+
+export function calculateYoYComparison(
+  transactions: Transaction[],
+  referenceDate = new Date()
+) {
+  const y = referenceDate.getFullYear();
+  const curYearTx = filterTransactionsByRange(transactions, `${y}-01-01`, `${y}-12-31`);
+  const prevYearTx = filterTransactionsByRange(transactions, `${y - 1}-01-01`, `${y - 1}-12-31`);
+  const curSum = calculatePeriodSummary(curYearTx);
+  const prevSum = calculatePeriodSummary(prevYearTx);
+
+  const delta = (c: number, p: number): MoMDelta => ({
+    current: c,
+    previous: p,
+    diff: c - p,
+    pct: p > 0 ? Math.round(((c - p) / p) * 1000) / 10 : null,
+  });
+
+  return {
+    currentYear: y,
+    previousYear: y - 1,
+    hasPreviousYearData: prevYearTx.length > 0,
+    income: delta(curSum.income, prevSum.income),
+    expense: delta(curSum.expense, prevSum.expense),
+    saving: delta(Math.max(0, curSum.savingNet), Math.max(0, prevSum.savingNet)),
+  };
+}
+
+export interface HeatmapDay {
+  date: string;
+  dayOfWeek: number; // 0=Mon .. 6=Sun
+  amount: number;
+  count: number;
+  level: 0 | 1 | 2 | 3 | 4;
+}
+
+export function buildDailyExpenseHeatmap(
+  transactions: Transaction[],
+  daysCount = 84,
+  referenceDate = new Date()
+): HeatmapDay[] {
+  const dailyMap = new Map<string, { amount: number; count: number }>();
+  for (const tx of transactions) {
+    if (tx.type !== 'expense' && !(tx.type === 'transfer' && tx.fee > 0)) continue;
+    const amt = tx.type === 'expense' ? tx.amount : tx.fee;
+    const prev = dailyMap.get(tx.date) ?? { amount: 0, count: 0 };
+    dailyMap.set(tx.date, { amount: prev.amount + amt, count: prev.count + 1 });
+  }
+
+  const raw: { date: string; dayOfWeek: number; amount: number; count: number }[] = [];
+  for (let i = daysCount - 1; i >= 0; i--) {
+    const d = new Date(referenceDate);
+    d.setDate(referenceDate.getDate() - i);
+    const iso = toISODate(d);
+    const entry = dailyMap.get(iso) ?? { amount: 0, count: 0 };
+    raw.push({
+      date: iso,
+      dayOfWeek: (d.getDay() + 6) % 7,
+      amount: entry.amount,
+      count: entry.count,
+    });
+  }
+
+  const nonZero = raw.map((r) => r.amount).filter((a) => a > 0).sort((a, b) => a - b);
+  const q1 = nonZero[Math.floor(nonZero.length * 0.25)] ?? 50000;
+  const q2 = nonZero[Math.floor(nonZero.length * 0.5)] ?? 150000;
+  const q3 = nonZero[Math.floor(nonZero.length * 0.75)] ?? 350000;
+
+  return raw.map((r) => {
+    let level: 0 | 1 | 2 | 3 | 4 = 0;
+    if (r.amount > 0) {
+      if (r.amount <= q1) level = 1;
+      else if (r.amount <= q2) level = 2;
+      else if (r.amount <= q3) level = 3;
+      else level = 4;
+    }
+    return { ...r, level };
+  });
+}
+
+export interface BibitHistoryPoint {
+  date: string;
+  label: string;
+  invested: number;
+  marketValue: number;
+  gain: number;
+}
+
+export function buildBibitHistorySeries(
+  wallet: Wallet,
+  valuations: WalletValuation[],
+  transactions: Transaction[],
+  products: InvestmentProduct[],
+  referenceDate = new Date()
+): BibitHistoryPoint[] {
+  const walletVals = valuations
+    .filter((v) => v.walletId === wallet.id)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const prodList = products.filter((p) => p.walletId === wallet.id);
+  const currentInvested = prodList.reduce((s, p) => s + p.investedAmount, 0);
+  const currentMarket = prodList.reduce((s, p) => s + p.marketValue, 0);
+
+  if (walletVals.length === 0) {
+    if (currentInvested === 0 && currentMarket === 0) return [];
+    const iso = toISODate(referenceDate);
+    return [
+      {
+        date: iso,
+        label: formatDateID(iso),
+        invested: currentInvested,
+        marketValue: currentMarket,
+        gain: currentMarket - currentInvested,
+      },
+    ];
+  }
+
+  // Reconstruct invested trajectory backwards from currentInvested using Bibit saving/withdrawal txs
+  const bibitFlows = transactions.filter(
+    (t) =>
+      (t.type === 'saving' && t.toWalletId === wallet.id) ||
+      (t.type === 'saving_withdrawal' && t.walletId === wallet.id) ||
+      (t.type === 'transfer' && (t.toWalletId === wallet.id || t.walletId === wallet.id))
+  );
+
+  const flowAfter = (dateIso: string) => {
+    let net = 0;
+    for (const t of bibitFlows) {
+      if (t.date <= dateIso) continue;
+      if (t.toWalletId === wallet.id) net += t.amount;
+      if (t.walletId === wallet.id) net -= t.amount;
+    }
+    return net;
+  };
+
+  const baseCurrentInvested =
+    currentInvested > 0
+      ? currentInvested
+      : calculateWalletBalances([wallet], transactions, [])[0]?.costBasis ?? wallet.openingBalance;
+
+  const pts: BibitHistoryPoint[] = walletVals.map((v) => {
+    const inv = Math.max(0, baseCurrentInvested - flowAfter(v.date));
+    return {
+      date: v.date,
+      label: formatDateID(v.date),
+      invested: inv,
+      marketValue: v.marketValue,
+      gain: v.marketValue - inv,
+    };
+  });
+
+  // Append live today point if products market value differs from last snapshot
+  const todayStr = toISODate(referenceDate);
+  if (currentMarket > 0) {
+    const last = pts[pts.length - 1];
+    if (!last || last.date < todayStr) {
+      pts.push({
+        date: todayStr,
+        label: 'Hari ini',
+        invested: currentInvested,
+        marketValue: currentMarket,
+        gain: currentMarket - currentInvested,
+      });
+    } else if (last.date === todayStr) {
+      last.invested = currentInvested;
+      last.marketValue = currentMarket;
+      last.gain = currentMarket - currentInvested;
+    }
+  }
+
+  return pts;
+}
+
+export function advanceRecurringDate(
+  dateIso: string,
+  frequency: RecurringRule['frequency'],
+  dayOfMonth = 1
+): string {
+  const d = new Date(`${dateIso}T00:00:00`);
+  if (frequency === 'daily') d.setDate(d.getDate() + 1);
+  else if (frequency === 'weekly') d.setDate(d.getDate() + 7);
+  else if (frequency === 'yearly') d.setFullYear(d.getFullYear() + 1);
+  else {
+    const targetMonth = d.getMonth() + 1;
+    const targetYear = d.getFullYear() + Math.floor(targetMonth / 12);
+    const normMonth = targetMonth % 12;
+    const maxDay = new Date(targetYear, normMonth + 1, 0).getDate();
+    return toISODate(new Date(targetYear, normMonth, Math.min(Math.max(1, dayOfMonth), maxDay)));
+  }
+  return toISODate(d);
+}
+
+// ==================== GOOGLE SHEETS 5-TAB MIRROR PAYLOAD ====================
+
+export function buildGoogleSheetsPayload(dataset: AppDataset, referenceDate = new Date()) {
+  const wMap = new Map(dataset.wallets.map((w) => [w.id, w.name]));
+  const cMap = new Map(dataset.categories.map((c) => [c.id, c.name]));
+  const sMap = new Map(dataset.subcategories.map((s) => [s.id, s]));
+  const pMap = new Map(dataset.investmentProducts.map((p) => [p.id, p.name]));
+
+  const balances = calculateWalletBalances(
+    dataset.wallets,
+    dataset.transactions,
+    dataset.valuations,
+    dataset.investmentProducts
+  );
+
+  const txRows = [
+    ['Tanggal', 'Tipe', 'Kategori', 'Sub-Kategori', 'Wallet', 'Ke Wallet', 'Produk Bibit', 'Nominal', 'Biaya Admin', 'Catatan'],
+    ...[...dataset.transactions]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .map((tx) => {
+        const sub = tx.subcategoryId ? sMap.get(tx.subcategoryId) : undefined;
+        return [
+          tx.date,
+          tx.type,
+          sub ? cMap.get(sub.categoryId) ?? '' : '',
+          sub?.name ?? '',
+          wMap.get(tx.walletId) ?? '',
+          tx.toWalletId ? wMap.get(tx.toWalletId) ?? '' : '',
+          tx.investmentProductId ? pMap.get(tx.investmentProductId) ?? '' : '',
+          tx.amount,
+          tx.fee,
+          tx.note,
+        ];
+      }),
+  ];
+
+  const walletRows = [
+    ['Dompet / Produk', 'Grup', 'Modal Disetor / Cost Basis', 'Saldo / Nilai Pasar', 'Untung/Rugi (Rp)', 'Return (%)'],
+    ...balances
+      .filter((b) => !b.wallet.hidden)
+      .map((b) => [
+        b.wallet.name,
+        b.wallet.group,
+        b.costBasis,
+        b.balance,
+        b.unrealizedGain,
+        b.unrealizedGainPct !== null ? `${b.unrealizedGainPct.toFixed(2)}%` : '0%',
+      ]),
+    ...dataset.investmentProducts.map((p) => {
+      const gain = p.marketValue - p.investedAmount;
+      const pct = p.investedAmount > 0 ? ((gain / p.investedAmount) * 100).toFixed(2) : '0';
+      return [`Bibit · ${p.name}`, `investasi:${p.assetClass}`, p.investedAmount, p.marketValue, gain, `${pct}%`];
+    }),
+  ];
+
+  const curRange = getPeriodRange('this_month', referenceDate);
+  const curTx = filterTransactionsByRange(dataset.transactions, curRange.start, curRange.end);
+  const expBud = calculateCategoryBudgets(dataset.categories, dataset.subcategories, curTx, 'expense').items;
+  const budgetRows = [
+    ['Kategori', 'Plafon Efektif', 'Realisasi Bulan Ini', 'Persentase (%)', 'Status'],
+    ...expBud.map((b) => [b.category.name, b.effectiveBudget ?? 0, b.actual, b.pct ?? 0, b.status]),
+  ];
+
+  const goalRows = [
+    ['Goal', 'Bersama', 'Target', 'Kontribusi Aku', 'Kontribusi Pasangan', 'Total Terkumpul', 'Progres (%)', 'Deadline'],
+    ...dataset.goals.map((g) => {
+      const pr = calculateGoalProgress(g, dataset.transactions, referenceDate, dataset.goalContributions, dataset.investmentProducts);
+      return [g.name, g.isShared ? 'Ya' : 'Tidak', g.targetAmount, pr.mySaved, pr.partnerSaved, pr.saved, `${pr.pct}%`, g.deadline ?? '-'];
+    }),
+  ];
+
+  const trend = buildMonthlyTrend(dataset.transactions, 6, referenceDate);
+  const summaryRows = [
+    ['Bulan', 'Income', 'Expense', 'Saving Net', 'Net Cashflow'],
+    ...trend.map((m) => [m.key, m.income, m.expense, m.saving, m.income - m.expense]),
+  ];
+
+  return {
+    generatedAt: new Date().toISOString(),
+    tabs: {
+      Transaksi: txRows,
+      Dompet_Bibit: walletRows,
+      Budget: budgetRows,
+      Goals_Pasangan: goalRows,
+      Ringkasan_Bulanan: summaryRows,
+    },
+  };
+}
+

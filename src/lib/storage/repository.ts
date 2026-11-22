@@ -1,10 +1,24 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { createInitialDataset, createSeedCategories, createSeedGoals, createSeedTemplates, createSeedWallets, todayISO } from '@/lib/seed';
+import {
+  createInitialDataset,
+  createSeedCategories,
+  createSeedGoals,
+  createSeedInvestmentProducts,
+  createSeedTemplates,
+  createSeedWallets,
+  todayISO,
+} from '@/lib/seed';
 import type {
+  AIMemory,
   AppDataset,
   Category,
   Goal,
+  GoalContribution,
+  GoalInvite,
+  InvestmentProduct,
   QuickTemplate,
+  RecurringRule,
+  SheetsSyncConfig,
   Subcategory,
   Transaction,
   UserProfile,
@@ -45,6 +59,19 @@ export function loadLocalDataset(): AppDataset {
       goals: parsed.goals ?? fallback.goals,
       transactions: parsed.transactions ?? [],
       valuations: parsed.valuations ?? [],
+      investmentProducts:
+        parsed.investmentProducts !== undefined
+          ? parsed.investmentProducts
+          : fallback.investmentProducts,
+      goalContributions: parsed.goalContributions ?? [],
+      goalInvites: parsed.goalInvites?.length ? parsed.goalInvites : fallback.goalInvites,
+      recurringRules: parsed.recurringRules ?? [],
+      aiMemory: {
+        patterns: parsed.aiMemory?.patterns ?? [],
+        preferences: parsed.aiMemory?.preferences ?? {},
+        feedbackLog: parsed.aiMemory?.feedbackLog ?? [],
+      },
+      sheetsSync: { ...fallback.sheetsSync, ...(parsed.sheetsSync ?? {}) },
       templates: parsed.templates?.length ? parsed.templates : fallback.templates,
     };
   } catch {
@@ -117,6 +144,7 @@ export async function loadSupabaseDataset(
       theme: 'dark',
       privacyMode: false,
       onboardingCompleted: false,
+      isDemoData: false,
     };
   } else {
     profile = {
@@ -129,17 +157,43 @@ export async function loadSupabaseDataset(
       theme: profileRow.theme ?? 'dark',
       privacyMode: Boolean(profileRow.privacy_mode),
       onboardingCompleted: Boolean(profileRow.onboarding_completed),
+      isDemoData: false,
     };
   }
 
-  const [walletsRes, catsRes, subsRes, goalsRes, txRes, valRes, tplRes] = await Promise.all([
+  const [
+    walletsRes,
+    catsRes,
+    subsRes,
+    goalsRes,
+    txRes,
+    valRes,
+    tplRes,
+    prodRes,
+    contribRes,
+    inviteRes,
+    recRes,
+    memRes,
+    sheetsRes,
+  ] = await Promise.all([
     supabase.from('wallets').select('*').eq('owner_id', userId).order('sort_order'),
     supabase.from('categories').select('*').eq('owner_id', userId).order('sort_order'),
     supabase.from('subcategories').select('*').eq('owner_id', userId).order('sort_order'),
     supabase.from('goals').select('*').eq('owner_id', userId).order('priority'),
-    supabase.from('transactions').select('*').eq('owner_id', userId).order('date', { ascending: false }).order('created_at', { ascending: false }),
+    supabase
+      .from('transactions')
+      .select('*')
+      .eq('owner_id', userId)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false }),
     supabase.from('wallet_valuations').select('*').eq('owner_id', userId).order('date', { ascending: false }),
     supabase.from('templates').select('*').eq('owner_id', userId).order('sort_order'),
+    supabase.from('investment_products').select('*').eq('owner_id', userId).order('sort_order'),
+    supabase.from('goal_contributions').select('*').eq('owner_id', userId).order('date', { ascending: false }),
+    supabase.from('goal_invites').select('*').eq('owner_id', userId),
+    supabase.from('recurring_rules').select('*').eq('owner_id', userId).order('next_run'),
+    supabase.from('ai_memory').select('*').eq('owner_id', userId).maybeSingle(),
+    supabase.from('sheets_sync').select('*').eq('owner_id', userId).maybeSingle(),
   ]);
 
   let wallets: Wallet[] = (walletsRes.data ?? []).map(mapWalletFromDb);
@@ -149,6 +203,34 @@ export async function loadSupabaseDataset(
   const transactions: Transaction[] = (txRes.data ?? []).map(mapTxFromDb);
   const valuations: WalletValuation[] = (valRes.data ?? []).map(mapValuationFromDb);
   let templates: QuickTemplate[] = (tplRes.data ?? []).map(mapTemplateFromDb);
+  let investmentProducts: InvestmentProduct[] = (prodRes.data ?? []).map(mapProductFromDb);
+  const goalContributions: GoalContribution[] = (contribRes.data ?? []).map(mapContributionFromDb);
+  const goalInvites: GoalInvite[] = (inviteRes.data ?? []).map(mapInviteFromDb);
+  const recurringRules: RecurringRule[] = (recRes.data ?? []).map(mapRecurringFromDb);
+
+  const aiMemory: AIMemory = memRes.data
+    ? {
+        patterns: Array.isArray(memRes.data.patterns) ? memRes.data.patterns : [],
+        preferences: memRes.data.preferences ?? {},
+        feedbackLog: Array.isArray(memRes.data.feedback_log) ? memRes.data.feedback_log : [],
+      }
+    : { patterns: [], preferences: {}, feedbackLog: [] };
+
+  const sheetsSync: SheetsSyncConfig = sheetsRes.data
+    ? {
+        status: sheetsRes.data.status === 'connected' ? 'connected' : 'disconnected',
+        spreadsheetId: sheetsRes.data.spreadsheet_id ?? '',
+        spreadsheetUrl: sheetsRes.data.spreadsheet_url ?? '',
+        autoSync: Boolean(sheetsRes.data.auto_sync),
+        lastSyncedAt: sheetsRes.data.last_synced_at ?? null,
+      }
+    : {
+        status: 'disconnected',
+        spreadsheetId: '',
+        spreadsheetUrl: '',
+        autoSync: false,
+        lastSyncedAt: null,
+      };
 
   // First-time cloud seeding
   if (wallets.length === 0 && categories.length === 0) {
@@ -158,6 +240,7 @@ export async function loadSupabaseDataset(
     subcategories = seeded.subcategories;
     goals = seeded.goals;
     templates = seeded.templates;
+    investmentProducts = seeded.investmentProducts;
   }
 
   return {
@@ -168,6 +251,12 @@ export async function loadSupabaseDataset(
     goals,
     transactions,
     valuations,
+    investmentProducts,
+    goalContributions,
+    goalInvites,
+    recurringRules,
+    aiMemory,
+    sheetsSync,
     templates,
   };
 }
@@ -177,8 +266,9 @@ async function seedSupabaseUser(supabase: SupabaseClient, userId: string) {
   const catIdMap = new Map<string, string>();
   const subIdMap = new Map<string, string>();
   const goalIdMap = new Map<string, string>();
+  const today = todayISO();
 
-  const seedWallets = createSeedWallets(todayISO()).map((w) => {
+  const seedWallets = createSeedWallets(today).map((w) => {
     const newId = generateUUID();
     walletIdMap.set(w.id, newId);
     return { ...w, id: newId };
@@ -207,6 +297,13 @@ async function seedSupabaseUser(supabase: SupabaseClient, userId: string) {
     };
   });
 
+  const seedProducts = createSeedInvestmentProducts(today).map((p) => ({
+    ...p,
+    id: generateUUID(),
+    walletId: walletIdMap.get(p.walletId) ?? seedWallets[0].id,
+    goalId: p.goalId ? goalIdMap.get(p.goalId) ?? null : null,
+  }));
+
   const seedTemplates = createSeedTemplates().map((t) => ({
     ...t,
     id: generateUUID(),
@@ -220,6 +317,7 @@ async function seedSupabaseUser(supabase: SupabaseClient, userId: string) {
   await supabase.from('categories').insert(seedCategories.map((c) => mapCategoryToDb(c, userId)));
   await supabase.from('subcategories').insert(seedSubcategories.map((s) => mapSubToDb(s, userId)));
   await supabase.from('goals').insert(seedGoals.map((g) => mapGoalToDb(g, userId)));
+  await supabase.from('investment_products').insert(seedProducts.map((p) => mapProductToDb(p, userId)));
   await supabase.from('templates').insert(
     seedTemplates.map((t, idx) => ({
       id: t.id,
@@ -235,6 +333,7 @@ async function seedSupabaseUser(supabase: SupabaseClient, userId: string) {
     categories: seedCategories,
     subcategories: seedSubcategories,
     goals: seedGoals,
+    investmentProducts: seedProducts,
     templates: seedTemplates,
   };
 }
@@ -368,6 +467,134 @@ export function mapGoalToDb(g: Goal, ownerId: string) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapProductFromDb(r: any): InvestmentProduct {
+  return {
+    id: r.id,
+    walletId: r.wallet_id,
+    goalId: r.goal_id ?? null,
+    name: r.name,
+    assetClass: r.asset_class ?? 'pu',
+    investedAmount: Number(r.invested_amount ?? 0),
+    marketValue: Number(r.market_value ?? 0),
+    color: r.color ?? '#10b981',
+    updatedAt: r.updated_at ?? todayISO(),
+    sortOrder: Number(r.sort_order ?? 0),
+  };
+}
+
+export function mapProductToDb(p: InvestmentProduct, ownerId: string) {
+  return {
+    id: p.id,
+    owner_id: ownerId,
+    wallet_id: p.walletId,
+    goal_id: p.goalId,
+    name: p.name,
+    asset_class: p.assetClass,
+    invested_amount: Math.round(p.investedAmount),
+    market_value: Math.round(p.marketValue),
+    color: p.color,
+    updated_at: p.updatedAt,
+    sort_order: p.sortOrder,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapContributionFromDb(r: any): GoalContribution {
+  return {
+    id: r.id,
+    goalId: r.goal_id,
+    contributorName: r.contributor_name ?? 'Pasangan',
+    isPartner: Boolean(r.is_partner),
+    amount: Number(r.amount ?? 0),
+    date: r.date,
+    productName: r.product_name ?? '',
+    note: r.note ?? '',
+  };
+}
+
+export function mapContributionToDb(c: GoalContribution, ownerId: string) {
+  return {
+    id: c.id,
+    owner_id: ownerId,
+    goal_id: c.goalId,
+    contributor_name: c.contributorName,
+    is_partner: c.isPartner,
+    amount: Math.round(c.amount),
+    date: c.date,
+    product_name: c.productName ?? '',
+    note: c.note,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapInviteFromDb(r: any): GoalInvite {
+  return {
+    goalId: r.goal_id,
+    code: r.code,
+    partnerName: r.partner_name ?? 'Pasangan',
+    partnerEmail: r.partner_email ?? '',
+    sharePercent: Number(r.share_percent ?? 50),
+    status: r.status === 'joined' ? 'joined' : 'pending',
+  };
+}
+
+export function mapInviteToDb(inv: GoalInvite, ownerId: string) {
+  return {
+    goal_id: inv.goalId,
+    owner_id: ownerId,
+    code: inv.code,
+    partner_name: inv.partnerName,
+    partner_email: inv.partnerEmail,
+    share_percent: inv.sharePercent,
+    status: inv.status,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapRecurringFromDb(r: any): RecurringRule {
+  const tpl = r.template ?? {};
+  return {
+    id: r.id,
+    label: tpl.label ?? 'Jadwal Rutin',
+    type: tpl.type ?? 'expense',
+    amount: Number(tpl.amount ?? 0),
+    subcategoryId: tpl.subcategoryId ?? null,
+    walletId: tpl.walletId ?? '',
+    toWalletId: tpl.toWalletId ?? null,
+    goalId: tpl.goalId ?? null,
+    investmentProductId: tpl.investmentProductId ?? null,
+    note: tpl.note ?? '',
+    frequency: r.frequency ?? 'monthly',
+    dayOfMonth: Number(r.day_of_month ?? 1),
+    nextRun: r.next_run,
+    active: Boolean(r.active),
+  };
+}
+
+export function mapRecurringToDb(rule: RecurringRule, ownerId: string) {
+  return {
+    id: rule.id,
+    owner_id: ownerId,
+    template: {
+      label: rule.label,
+      type: rule.type,
+      amount: Math.round(rule.amount),
+      subcategoryId: rule.subcategoryId,
+      walletId: rule.walletId,
+      toWalletId: rule.toWalletId,
+      goalId: rule.goalId,
+      investmentProductId: rule.investmentProductId ?? null,
+      note: rule.note,
+    },
+    frequency: rule.frequency,
+    day_of_month: rule.dayOfMonth,
+    auto_create: false,
+    next_run: rule.nextRun,
+    active: rule.active,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapTxFromDb(r: any): Transaction {
   return {
     id: r.id,
@@ -379,6 +606,7 @@ function mapTxFromDb(r: any): Transaction {
     amount: Number(r.amount ?? 0),
     fee: Number(r.fee ?? 0),
     goalId: r.goal_id ?? null,
+    investmentProductId: r.investment_product_id ?? null,
     note: r.note ?? '',
     createdAt: r.created_at,
   };
@@ -396,6 +624,7 @@ export function mapTxToDb(tx: Transaction, ownerId: string) {
     amount: Math.round(tx.amount),
     fee: Math.round(tx.fee ?? 0),
     goal_id: tx.goalId,
+    investment_product_id: tx.investmentProductId ?? null,
     note: tx.note,
     created_at: tx.createdAt,
   };

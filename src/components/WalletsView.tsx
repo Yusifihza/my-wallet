@@ -3,14 +3,19 @@
 import { useMemo, useState } from 'react';
 import {
   ArrowLeftRight,
+  Pencil,
   Plus,
   RefreshCw,
+  Trash2,
   TrendingUp,
   X,
 } from 'lucide-react';
 import {
   Area,
   AreaChart,
+  Legend,
+  Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -19,17 +24,27 @@ import {
 import { DynamicIcon } from '@/components/IconMap';
 import { useWallet } from '@/context/WalletContext';
 import {
+  buildBibitHistorySeries,
   buildWalletHistory30Days,
   formatDateID,
   formatIDR,
+  formatIDRCompact,
   parseAmountExpression,
 } from '@/lib/finance';
-import { todayISO, WALLET_GROUP_LABELS, WALLET_GROUP_ORDER } from '@/lib/seed';
-import type { WalletGroup } from '@/types/finance';
+import {
+  INVESTMENT_ASSET_COLORS,
+  INVESTMENT_ASSET_LABELS,
+  INVESTMENT_ASSET_ORDER,
+  todayISO,
+  WALLET_GROUP_LABELS,
+  WALLET_GROUP_ORDER,
+} from '@/lib/seed';
+import type { InvestmentAssetClass, InvestmentProduct, WalletGroup } from '@/types/finance';
 
 export function WalletsView() {
   const {
     dataset,
+    nowDate,
     walletBalances,
     visibleWalletBalances,
     netWorth,
@@ -38,6 +53,10 @@ export function WalletsView() {
     addValuation,
     addWallet,
     updateWallet,
+    addInvestmentProduct,
+    updateInvestmentProduct,
+    updateProductMarketValue,
+    deleteInvestmentProduct,
   } = useWallet();
 
   const privacy = dataset.profile.privacyMode;
@@ -56,6 +75,48 @@ export function WalletsView() {
   const [newGroup, setNewGroup] = useState<WalletGroup>('bank');
   const [newOpening, setNewOpening] = useState('');
 
+  // Bibit Multi-Product Portfolio state
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<InvestmentProduct | null>(null);
+  const [prodName, setProdName] = useState('');
+  const [prodClass, setProdClass] = useState<InvestmentAssetClass>('sbn');
+  const [prodGoalId, setProdGoalId] = useState<string>('');
+  const [prodInvested, setProdInvested] = useState('');
+  const [prodMarket, setProdMarket] = useState('');
+  const [quickValProdId, setQuickValProdId] = useState<string | null>(null);
+  const [quickValInput, setQuickValInput] = useState('');
+
+  const bibitWallet = useMemo(
+    () => dataset.wallets.find((w) => w.group === 'investment') ?? null,
+    [dataset.wallets]
+  );
+  const bibitBalance = useMemo(
+    () => (bibitWallet ? walletBalances.find((b) => b.wallet.id === bibitWallet.id) ?? null : null),
+    [bibitWallet, walletBalances]
+  );
+  const bibitProducts = useMemo(
+    () =>
+      bibitWallet
+        ? dataset.investmentProducts
+            .filter((p) => p.walletId === bibitWallet.id)
+            .sort((a, b) => a.sortOrder - b.sortOrder)
+        : [],
+    [bibitWallet, dataset.investmentProducts]
+  );
+  const bibitHistory = useMemo(
+    () =>
+      bibitWallet
+        ? buildBibitHistorySeries(
+            bibitWallet,
+            dataset.valuations,
+            dataset.transactions,
+            dataset.investmentProducts,
+            nowDate
+          )
+        : [],
+    [bibitWallet, dataset.investmentProducts, dataset.transactions, dataset.valuations, nowDate]
+  );
+
   const selectedBalance = useMemo(
     () => walletBalances.find((b) => b.wallet.id === selectedWalletId) ?? null,
     [selectedWalletId, walletBalances]
@@ -63,8 +124,8 @@ export function WalletsView() {
 
   const selectedHistory = useMemo(() => {
     if (!selectedBalance) return [];
-    return buildWalletHistory30Days(selectedBalance.wallet, dataset.transactions);
-  }, [dataset.transactions, selectedBalance]);
+    return buildWalletHistory30Days(selectedBalance.wallet, dataset.transactions, nowDate);
+  }, [dataset.transactions, nowDate, selectedBalance]);
 
   const selectedMutations = useMemo(() => {
     if (!selectedWalletId) return [];
@@ -138,16 +199,76 @@ export function WalletsView() {
     setShowAddWallet(false);
   };
 
+  const openCreateProduct = () => {
+    setEditingProduct(null);
+    setProdName('');
+    setProdClass('sbn');
+    setProdGoalId(dataset.goals.find((g) => g.isShared)?.id ?? '');
+    setProdInvested('');
+    setProdMarket('');
+    setShowProductModal(true);
+  };
+
+  const openEditProduct = (prod: InvestmentProduct) => {
+    setEditingProduct(prod);
+    setProdName(prod.name);
+    setProdClass(prod.assetClass);
+    setProdGoalId(prod.goalId ?? '');
+    setProdInvested(prod.investedAmount ? String(prod.investedAmount) : '');
+    setProdMarket(prod.marketValue ? String(prod.marketValue) : '');
+    setShowProductModal(true);
+  };
+
+  const handleProductSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bibitWallet || !prodName.trim()) return;
+    const inv = parseAmountExpression(prodInvested).value;
+    const mkt = prodMarket.trim() ? parseAmountExpression(prodMarket).value : inv;
+    if (editingProduct) {
+      updateInvestmentProduct({
+        ...editingProduct,
+        name: prodName.trim(),
+        assetClass: prodClass,
+        goalId: prodGoalId || null,
+        investedAmount: inv,
+        marketValue: mkt,
+        color: INVESTMENT_ASSET_COLORS[prodClass],
+      });
+    } else {
+      addInvestmentProduct({
+        walletId: bibitWallet.id,
+        goalId: prodGoalId || null,
+        name: prodName.trim(),
+        assetClass: prodClass,
+        investedAmount: inv,
+        marketValue: mkt,
+        color: INVESTMENT_ASSET_COLORS[prodClass],
+      });
+    }
+    setShowProductModal(false);
+    setEditingProduct(null);
+  };
+
+  const handleQuickMarketSave = (prodId: string) => {
+    const val = parseAmountExpression(quickValInput).value;
+    if (val < 0) return;
+    updateProductMarketValue(prodId, val);
+    setQuickValProdId(null);
+    setQuickValInput('');
+  };
+
+  const bibitTotalMarket = bibitProducts.reduce((s, p) => s + p.marketValue, 0);
+
   return (
     <div className="space-y-5">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl md:text-2xl font-bold tracking-tight text-[var(--mw-text)]">
-            Dompet &amp; Transfer
+            Dompet &amp; Portofolio Bibit
           </h1>
           <p className="text-xs text-[var(--mw-text-muted)]">
-            Saldo dihitung otomatis dari saldo awal dan seluruh transaksi
+            Saldo otomatis tiap dompet serta nilai pasar multi-produk Bibit (PU, Obligasi, Reksa Saham, Saham, SBN)
           </p>
         </div>
 
@@ -187,12 +308,323 @@ export function WalletsView() {
           </div>
         </div>
         <div className="mw-card rounded-2xl p-4">
-          <div className="text-xs text-[var(--mw-text-muted)]">Aset Investasi</div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-[var(--mw-text-muted)]">Nilai Pasar Bibit</span>
+            {bibitBalance && bibitBalance.unrealizedGainPct !== null && (
+              <span
+                className="text-xs font-bold tab-num px-2 py-0.5 rounded-full"
+                style={{
+                  background:
+                    bibitBalance.unrealizedGain >= 0
+                      ? 'var(--mw-income-soft)'
+                      : 'var(--mw-expense-soft)',
+                  color:
+                    bibitBalance.unrealizedGain >= 0
+                      ? 'var(--mw-income)'
+                      : 'var(--mw-expense)',
+                }}
+              >
+                {bibitBalance.unrealizedGain >= 0 ? '+' : ''}
+                {bibitBalance.unrealizedGainPct.toFixed(2).replace('.', ',')}%
+              </span>
+            )}
+          </div>
           <div className="text-xl font-bold tab-num text-[var(--mw-primary)] mt-1">
             {formatIDR(netWorth.investment, privacy)}
           </div>
         </div>
       </div>
+
+      {/* Dedicated Bibit Multi-Product Portfolio & Market Valuation Panel */}
+      {bibitWallet && bibitBalance && (
+        <section className="mw-card rounded-3xl p-5 space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-[var(--mw-primary)]" />
+                <h2 className="text-base font-bold text-[var(--mw-text)]">
+                  Portofolio &amp; Nilai Pasar Bibit ({bibitProducts.length} Produk)
+                </h2>
+              </div>
+              <p className="text-xs text-[var(--mw-text-muted)]">
+                Catat modal setor &amp; update nilai pasar per produk (PU, Obligasi, Reksa Saham, Saham, SBN, atau produk baru)
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={openCreateProduct}
+                className="px-3.5 py-2 rounded-xl text-xs font-semibold text-white inline-flex items-center gap-1.5 cursor-pointer"
+                style={{ background: 'var(--mw-primary)' }}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Tambah Produk</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedWalletId(bibitWallet.id)}
+                className="px-3 py-2 rounded-xl text-xs font-medium bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] cursor-pointer"
+              >
+                Mutasi Bibit
+              </button>
+            </div>
+          </div>
+
+          {/* Bibit Top KPIs */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+            <div className="p-3.5 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)]">
+              <div className="text-[var(--mw-text-muted)]">Total Modal Disetor</div>
+              <div className="text-base font-bold tab-num text-[var(--mw-text)] mt-0.5">
+                {formatIDR(bibitBalance.costBasis, privacy)}
+              </div>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)]">
+              <div className="text-[var(--mw-text-muted)]">Total Nilai Pasar</div>
+              <div className="text-base font-bold tab-num text-[var(--mw-primary)] mt-0.5">
+                {formatIDR(bibitBalance.balance, privacy)}
+              </div>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)]">
+              <div className="text-[var(--mw-text-muted)]">Total Untung / Rugi</div>
+              <div
+                className="text-base font-bold tab-num mt-0.5"
+                style={{
+                  color:
+                    bibitBalance.unrealizedGain >= 0 ? 'var(--mw-income)' : 'var(--mw-expense)',
+                }}
+              >
+                {bibitBalance.unrealizedGain >= 0 ? '+' : ''}
+                {formatIDR(bibitBalance.unrealizedGain, privacy)}
+                {bibitBalance.unrealizedGainPct !== null
+                  ? ` (${bibitBalance.unrealizedGain >= 0 ? '+' : ''}${bibitBalance.unrealizedGainPct.toFixed(2).replace('.', ',')}%)`
+                  : ''}
+              </div>
+            </div>
+          </div>
+
+          {/* Allocation Stacked Bar */}
+          {bibitTotalMarket > 0 && (
+            <div className="space-y-1.5">
+              <div className="h-3 rounded-full overflow-hidden flex bg-[var(--mw-surface-2)]">
+                {bibitProducts
+                  .filter((p) => p.marketValue > 0)
+                  .map((p) => (
+                    <div
+                      key={p.id}
+                      style={{
+                        width: `${(p.marketValue / bibitTotalMarket) * 100}%`,
+                        background: p.color,
+                      }}
+                      title={`${p.name}: ${Math.round((p.marketValue / bibitTotalMarket) * 100)}%`}
+                    />
+                  ))}
+              </div>
+              <div className="flex flex-wrap gap-3 text-xs text-[var(--mw-text-muted)]">
+                {bibitProducts
+                  .filter((p) => p.marketValue > 0)
+                  .map((p) => (
+                    <span key={p.id} className="inline-flex items-center gap-1.5">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full"
+                        style={{ background: p.color }}
+                      />
+                      <span>
+                        {p.name}{' '}
+                        <b className="tab-num text-[var(--mw-text)]">
+                          {Math.round((p.marketValue / bibitTotalMarket) * 100)}%
+                        </b>
+                      </span>
+                    </span>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* Chart: Modal Disetor vs Nilai Pasar */}
+          {bibitHistory.length >= 2 && (
+            <div className="p-3.5 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)] space-y-2">
+              <div className="text-xs font-semibold text-[var(--mw-text-muted)]">
+                Grafik Modal Disetor vs Nilai Pasar Bibit
+              </div>
+              <div className="h-44 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={bibitHistory} margin={{ top: 6, right: 12, left: -10, bottom: 0 }}>
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fill: 'var(--mw-text-dim)', fontSize: 11 }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tick={{ fill: 'var(--mw-text-dim)', fontSize: 10 }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v) => formatIDRCompact(Number(v), privacy)}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: 'var(--mw-surface)',
+                        border: '1px solid var(--mw-border)',
+                        borderRadius: '12px',
+                        fontSize: '12px',
+                      }}
+                      formatter={(val, name) => [
+                        formatIDR(Number(val ?? 0), privacy),
+                        name === 'marketValue' ? 'Nilai Pasar' : 'Modal Disetor',
+                      ]}
+                    />
+                    <Legend
+                      wrapperStyle={{ fontSize: '11px' }}
+                      formatter={(v) => (v === 'marketValue' ? 'Nilai Pasar' : 'Modal Disetor')}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="invested"
+                      stroke="#94a3b8"
+                      strokeWidth={2}
+                      strokeDasharray="4 4"
+                      dot={{ r: 3 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="marketValue"
+                      stroke="#10b981"
+                      strokeWidth={2.5}
+                      dot={{ r: 3.5 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {/* Product Breakdown Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
+            {bibitProducts.map((p) => {
+              const gain = p.marketValue - p.investedAmount;
+              const retPct =
+                p.investedAmount > 0 ? (gain / p.investedAmount) * 100 : null;
+              const goal = p.goalId ? dataset.goals.find((g) => g.id === p.goalId) : null;
+              const isQuickUpdating = quickValProdId === p.id;
+
+              return (
+                <div
+                  key={p.id}
+                  className="p-3.5 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)] space-y-2.5 text-xs"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ background: p.color }}
+                        />
+                        <span className="text-sm font-bold text-[var(--mw-text)] truncate">
+                          {p.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-[var(--mw-surface)] text-[var(--mw-text-muted)]">
+                          {INVESTMENT_ASSET_LABELS[p.assetClass]}
+                        </span>
+                        {goal && (
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-[var(--mw-primary-soft)] text-[var(--mw-primary)] font-medium">
+                            🎯 {goal.name}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => openEditProduct(p)}
+                        title="Edit produk"
+                        className="p-1 rounded-lg bg-[var(--mw-surface)] text-[var(--mw-text-muted)] hover:text-[var(--mw-text)] cursor-pointer"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteInvestmentProduct(p.id)}
+                        title="Hapus produk"
+                        className="p-1 rounded-lg bg-[var(--mw-surface)] text-[var(--mw-text-dim)] hover:text-red-400 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div>
+                      <div className="text-[11px] text-[var(--mw-text-dim)]">Modal Setor</div>
+                      <div className="font-semibold tab-num text-[var(--mw-text)]">
+                        {formatIDR(p.investedAmount, privacy)}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[11px] text-[var(--mw-text-dim)]">Nilai Pasar</div>
+                      <div className="font-bold tab-num text-[var(--mw-text)]">
+                        {formatIDR(p.marketValue, privacy)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1.5 border-t border-[var(--mw-border)]">
+                    <span
+                      className="font-semibold tab-num"
+                      style={{
+                        color: gain >= 0 ? 'var(--mw-income)' : 'var(--mw-expense)',
+                      }}
+                    >
+                      {gain >= 0 ? '+' : ''}
+                      {formatIDR(gain, privacy)}
+                      {retPct !== null
+                        ? ` (${gain >= 0 ? '+' : ''}${retPct.toFixed(2).replace('.', ',')}%)`
+                        : ''}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickValProdId(isQuickUpdating ? null : p.id);
+                        setQuickValInput(p.marketValue ? String(p.marketValue) : '');
+                      }}
+                      className="px-2 py-1 rounded-lg bg-[var(--mw-surface)] border border-[var(--mw-border)] text-[var(--mw-primary)] font-semibold cursor-pointer"
+                    >
+                      Update Pasar
+                    </button>
+                  </div>
+
+                  {isQuickUpdating && (
+                    <div className="flex gap-1.5 pt-1">
+                      <input
+                        type="text"
+                        autoFocus
+                        value={quickValInput}
+                        onChange={(e) => setQuickValInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleQuickMarketSave(p.id);
+                        }}
+                        placeholder="Nilai pasar (mis. 4,5jt)"
+                        className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg bg-[var(--mw-surface)] border border-[var(--mw-primary)] text-[var(--mw-text)] tab-num focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleQuickMarketSave(p.id)}
+                        className="px-2.5 py-1.5 rounded-lg text-white font-semibold cursor-pointer"
+                        style={{ background: 'var(--mw-primary)' }}
+                      >
+                        Simpan
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Grouped Wallet Cards */}
       <div className="space-y-5">
@@ -602,6 +1034,120 @@ export function WalletsView() {
                 style={{ background: 'var(--mw-primary)' }}
               >
                 Simpan Wallet
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Add / Edit Bibit Investment Product Modal */}
+      {showProductModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'var(--mw-backdrop)' }}
+        >
+          <form
+            onSubmit={handleProductSubmit}
+            className="w-full max-w-md mw-card rounded-3xl p-5 space-y-4 animate-sheet-up"
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-bold text-[var(--mw-text)]">
+                {editingProduct ? `Edit Produk: ${editingProduct.name}` : 'Tambah Produk Bibit Baru'}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowProductModal(false)}
+                className="p-1.5 rounded-lg bg-[var(--mw-surface-2)] text-[var(--mw-text-muted)] cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-[var(--mw-text-muted)] mb-1">Nama Produk</label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={prodName}
+                  onChange={(e) => setProdName(e.target.value)}
+                  placeholder="Mis. SBN ORI027, Sucorinvest PU, BBCA"
+                  className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none focus:border-[var(--mw-primary)]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[var(--mw-text-muted)] mb-1">Jenis Instrumen</label>
+                  <select
+                    value={prodClass}
+                    onChange={(e) => setProdClass(e.target.value as InvestmentAssetClass)}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)]"
+                  >
+                    {INVESTMENT_ASSET_ORDER.map((cls) => (
+                      <option key={cls} value={cls}>
+                        {INVESTMENT_ASSET_LABELS[cls]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[var(--mw-text-muted)] mb-1">Hubungkan ke Goal</label>
+                  <select
+                    value={prodGoalId}
+                    onChange={(e) => setProdGoalId(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)]"
+                  >
+                    <option value="">Pribadi (Tanpa Goal)</option>
+                    {dataset.goals.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[var(--mw-text-muted)] mb-1">Modal Disetor</label>
+                  <input
+                    type="text"
+                    value={prodInvested}
+                    onChange={(e) => setProdInvested(e.target.value)}
+                    placeholder="Mis. 2jt"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none focus:border-[var(--mw-primary)]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[var(--mw-text-muted)] mb-1">Nilai Pasar Saat Ini</label>
+                  <input
+                    type="text"
+                    value={prodMarket}
+                    onChange={(e) => setProdMarket(e.target.value)}
+                    placeholder="Kosong = sama modal"
+                    className="w-full px-3 py-2.5 rounded-xl text-sm bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none focus:border-[var(--mw-primary)]"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowProductModal(false)}
+                className="px-4 py-2.5 rounded-xl text-xs font-medium bg-[var(--mw-surface-2)] text-[var(--mw-text)] cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2.5 rounded-xl text-xs font-semibold text-white cursor-pointer"
+                style={{ background: 'var(--mw-primary)' }}
+              >
+                {editingProduct ? 'Simpan Perubahan' : 'Simpan Produk'}
               </button>
             </div>
           </form>
