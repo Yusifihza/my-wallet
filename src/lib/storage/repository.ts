@@ -178,7 +178,7 @@ async function seedSupabaseUser(supabase: SupabaseClient, userId: string) {
   const subIdMap = new Map<string, string>();
   const goalIdMap = new Map<string, string>();
 
-  const seedWallets = createSeedWallets().map((w) => {
+  const seedWallets = createSeedWallets(todayISO()).map((w) => {
     const newId = generateUUID();
     walletIdMap.set(w.id, newId);
     return { ...w, id: newId };

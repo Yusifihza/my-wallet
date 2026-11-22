@@ -132,21 +132,27 @@ export function OnboardingWizard() {
   };
 
   const fillQuickSample = () => {
-    setInputs((prev) => ({
-      ...prev,
-      w_tunai: '320rb',
-      w_jago: '3,2jt',
-      w_krom: '1,5jt',
-      w_bni: '900rb',
-      w_mandiri: '1,1jt',
-      w_gopay: '450rb',
-      w_shopeepay: '200rb',
-      w_dana: '150rb',
-      w_linkaja: '50rb',
-      w_ovo: '90rb',
-      w_emoney: '140rb',
-      w_bibit: '10jt',
-    }));
+    const sampleByName: Record<string, string> = {
+      Tunai: '320rb',
+      Jago: '3,2jt',
+      Krom: '1,5jt',
+      BNI: '900rb',
+      Mandiri: '1,1jt',
+      GoPay: '450rb',
+      ShopeePay: '200rb',
+      DANA: '150rb',
+      LinkAja: '50rb',
+      OVO: '90rb',
+      'Mandiri e-money': '140rb',
+      Bibit: '10jt',
+    };
+    setInputs((prev) => {
+      const next = { ...prev };
+      activeWallets.forEach((w) => {
+        if (sampleByName[w.name]) next[w.id] = sampleByName[w.name];
+      });
+      return next;
+    });
   };
 
   return (
