@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { answerFinancialQuestion, generateFinancialInsights } from '@/lib/advisor';
+import { callGeminiGenerateContent } from '@/lib/gemini';
 import type { AppDataset } from '@/types/finance';
 
 export async function POST(request: Request) {
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY?.trim();
     const localFallback = answerFinancialQuestion(question, dataset);
 
     if (!apiKey) {
@@ -76,34 +77,18 @@ ${JSON.stringify(contextPayload)}
 PERTANYAAN USER:
 ${question}`;
 
-    const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
-    for (const model of models) {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.4,
-              maxOutputTokens: 700,
-            },
-          }),
-        }
-      );
+    const aiRes = await callGeminiGenerateContent({
+      apiKey,
+      parts: [{ text: prompt }],
+      maxOutputTokens: 1500,
+    });
 
-      if (!res.ok) continue;
-
-      const data = await res.json();
-      const geminiText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (geminiText) {
-        return NextResponse.json({
-          answer: geminiText.trim(),
-          topic: localFallback.topic,
-          engine: 'gemini',
-        });
-      }
+    if (aiRes.ok && aiRes.text) {
+      return NextResponse.json({
+        answer: aiRes.text,
+        topic: localFallback.topic,
+        engine: 'gemini',
+      });
     }
 
     return NextResponse.json({

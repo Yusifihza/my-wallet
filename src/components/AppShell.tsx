@@ -243,7 +243,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               onClick={openReceiptScanner}
               aria-label="Scan Struk AI"
               title="Scan Struk AI"
-              className="w-9 h-9 rounded-xl bg-[var(--mw-surface-2)] hover:bg-[var(--mw-surface-3)] border border-[var(--mw-border)] flex items-center justify-center text-[var(--mw-primary)] cursor-pointer transition"
+              className="hidden md:flex w-9 h-9 rounded-xl bg-[var(--mw-surface-2)] hover:bg-[var(--mw-surface-3)] border border-[var(--mw-border)] items-center justify-center text-[var(--mw-primary)] cursor-pointer transition"
             >
               <Camera className="w-4 h-4" />
             </button>
@@ -312,47 +312,75 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* MOBILE BOTTOM NAVIGATION (< md) */}
       <nav
         aria-label="Navigasi bawah mobile"
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-[var(--mw-border)] bg-[var(--mw-surface)]/95 backdrop-blur-md px-2 pt-1.5 pb-safe"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-[var(--mw-border)] bg-[var(--mw-surface)]/95 backdrop-blur-md px-1.5 pt-1.5 pb-safe"
       >
-        <div className="grid grid-cols-5 items-center max-w-md mx-auto">
-          <MobileNavLink href="/" label="Beranda" icon={Home} active={pathname === '/'} />
-          <MobileNavLink
-            href="/transactions"
-            label="Transaksi"
-            icon={ArrowLeftRight}
-            active={pathname.startsWith('/transactions')}
-          />
+        <div className="flex items-end justify-between max-w-md mx-auto">
+          <div className="flex-1 grid grid-cols-2">
+            <MobileNavLink href="/" label="Beranda" icon={Home} active={pathname === '/'} />
+            <MobileNavLink
+              href="/transactions"
+              label="Transaksi"
+              icon={ArrowLeftRight}
+              active={pathname.startsWith('/transactions')}
+            />
+          </div>
 
-          {/* Center Emerald + Button */}
-          <div className="flex justify-center">
+          {/* Center Side-by-Side Buttons: + Catat & Scan Struk */}
+          <div className="shrink-0 flex items-end gap-1.5 px-1">
             <button
               type="button"
               onClick={() => openQuickInput({ mode: 'create' })}
               aria-label="Tambah Transaksi"
-              className="w-12 h-12 -mt-4 rounded-2xl text-white flex items-center justify-center shadow-lg active:scale-95 transition cursor-pointer"
-              style={{
-                background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)',
-              }}
+              className="flex flex-col items-center justify-center gap-0.5 py-1 active:scale-95 transition cursor-pointer"
             >
-              <Plus className="w-6 h-6" />
+              <span
+                className="w-11 h-10 -mt-4 rounded-2xl text-white flex items-center justify-center shadow-lg"
+                style={{
+                  background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)',
+                }}
+              >
+                <Plus className="w-5 h-5" />
+              </span>
+              <span className="text-[10px] font-semibold text-[var(--mw-primary)]">Catat</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={openReceiptScanner}
+              aria-label="Scan Struk AI"
+              className="flex flex-col items-center justify-center gap-0.5 py-1 active:scale-95 transition cursor-pointer"
+            >
+              <span
+                className="w-11 h-10 -mt-4 rounded-2xl flex items-center justify-center shadow-lg border"
+                style={{
+                  background: 'var(--mw-surface-2)',
+                  borderColor: 'var(--mw-primary)',
+                  color: 'var(--mw-primary)',
+                }}
+              >
+                <Camera className="w-5 h-5" />
+              </span>
+              <span className="text-[10px] font-semibold text-[var(--mw-primary)]">Scan</span>
             </button>
           </div>
 
-          <MobileNavLink
-            href="/goals"
-            label="Goals"
-            icon={Target}
-            active={pathname.startsWith('/goals')}
-          />
+          <div className="flex-1 grid grid-cols-2">
+            <MobileNavLink
+              href="/goals"
+              label="Goals"
+              icon={Target}
+              active={pathname.startsWith('/goals')}
+            />
 
-          <button
-            type="button"
-            onClick={() => setMobileMenuOpen(true)}
-            className="flex flex-col items-center justify-center gap-0.5 py-1 text-[var(--mw-text-muted)] cursor-pointer"
-          >
-            <Menu className="w-5 h-5" />
-            <span className="text-[11px] font-medium">Menu</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              className="flex flex-col items-center justify-center gap-0.5 py-1 text-[var(--mw-text-muted)] cursor-pointer"
+            >
+              <Menu className="w-5 h-5" />
+              <span className="text-[11px] font-medium">Menu</span>
+            </button>
+          </div>
         </div>
       </nav>
 

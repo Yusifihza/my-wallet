@@ -1514,25 +1514,26 @@ function QuickInputSheetInner() {
       {/* Container */}
       <div className="relative w-full md:w-[440px] max-h-[94dvh] md:max-h-none md:h-full bg-[var(--mw-surface)] rounded-t-3xl md:rounded-none md:border-l border-t md:border-t-0 border-[var(--mw-border)] flex flex-col animate-sheet-up md:animate-panel-right overflow-hidden">
         {/* Mobile grab handle */}
-        <div className="md:hidden pt-2.5 pb-1 flex justify-center">
+        <div className="md:hidden pt-2 pb-0.5 flex justify-center">
           <div className="w-10 h-1 rounded-full bg-[var(--mw-border)]" />
         </div>
 
-        {/* Desktop Header */}
-        <div className="hidden md:flex items-center justify-between px-5 py-4 border-b border-[var(--mw-border)]">
-          <div>
-            <h2 className="text-base font-bold text-[var(--mw-text)]">
-              {isEdit ? 'Edit Transaksi' : 'Input Transaksi Cepat'}
+        {/* Header (Mobile + Desktop) with visible X Close button */}
+        <div className="flex items-center justify-between gap-2 px-4 md:px-5 py-2.5 md:py-4 border-b border-[var(--mw-border)]">
+          <div className="min-w-0">
+            <h2 className="text-sm md:text-base font-bold text-[var(--mw-text)] truncate">
+              {isEdit ? 'Edit Transaksi' : 'Tambah Transaksi'}
             </h2>
-            <p className="text-xs text-[var(--mw-text-muted)]">
+            <p className="hidden md:block text-xs text-[var(--mw-text-muted)]">
               Shortcut: ketik 25rb, 1,5jt, atau 45k+12k · Ctrl+Enter simpan
             </p>
           </div>
           <button
             type="button"
             onClick={closeQuickInput}
-            aria-label="Tutup panel"
-            className="p-2 rounded-xl bg-[var(--mw-surface-2)] text-[var(--mw-text-muted)] hover:text-[var(--mw-text)] cursor-pointer"
+            aria-label="Tutup panel tambah transaksi"
+            title="Tutup"
+            className="w-8 h-8 md:w-9 md:h-9 rounded-xl bg-[var(--mw-surface-2)] hover:bg-[var(--mw-surface-3)] border border-[var(--mw-border)] text-[var(--mw-text-muted)] hover:text-[var(--mw-text)] flex items-center justify-center shrink-0 cursor-pointer transition"
           >
             <X className="w-4 h-4" />
           </button>

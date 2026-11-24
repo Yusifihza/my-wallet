@@ -278,19 +278,19 @@ export function matchSubcategoryFallback(
   // 2. Indonesian receipt item keyword rules
   const keywordRules: [RegExp, RegExp][] = [
     [
-      /kopi|coffee|latte|cappuccino|americano|espresso|matcha|frappe|starbucks|fore|kenangan|janji jiwa|point coffee|tomoro|tuku|kafe|cafe/,
+      /kopi|coffee|coffe|latte|cappuccino|americano|espresso|matcha|frappe|starbucks|fore|kenangan|janji jiwa|point coffee|tomoro|tuku|cofus|kanora|mount blanc|kafe|cafe/,
       /kafe/i,
     ],
     [
-      /nasi|ayam|mie|bakso|soto|geprek|padang|warteg|sate|burger|pizza|ramen|sushi|bento|rice|chicken|beef|gofood|grabfood|shopeefood|makan/,
+      /nasi|ayam|sambal bakar|mie|bakso|soto|geprek|padang|warteg|sate|burger|pizza|ramen|sushi|bento|rice|chicken|beef|gofood|grabfood|shopeefood|teh es|es teh|makan/,
       /makanan pokok|restoran/i,
     ],
     [
-      /snack|keripik|chitato|lays|pocky|coklat|chocolate|es krim|ice cream|boba|teh botol|aqua|le minerale|mineral|roti|bread|kue|donut|jajanan/,
+      /snack|keripik|chitato|lays|pocky|coklat|chocolate|es krim|ice cream|boba|soda|teh botol|aqua|aquviva|le minerale|mineral|roti|bread|kue|donut|jajanan/,
       /jajanan/i,
     ],
     [
-      /sabun|shampoo|odol|pasta gigi|pepsodent|sikat gigi|tisu|tissue|deterjen|rinso|molto|sunlight|indomaret|alfamart|superindo|hypermart|minyak goreng|beras|telur|susu|gula|kecap/,
+      /sabun|shampoo|odol|pasta gigi|pepsodent|sikat gigi|tisu|tissue|nice\s*buy|paseo|deterjen|rinso|molto|sunlight|indomaret|alfamart|superindo|hypermart|minyak goreng|beras|telur|susu|gula|kecap/,
       /belanja bulanan/i,
     ],
     [/pertamax|pertalite|dexlite|solar|spbu|shell|vivo|bensin|bbm/, /bensin/i],

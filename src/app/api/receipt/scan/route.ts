@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { callGeminiGenerateContent } from '@/lib/gemini';
 
 interface InputSubcategory {
   id: string;
@@ -39,19 +40,17 @@ interface RawAiReceipt {
 
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_BASE64_BYTES = 6 * 1024 * 1024; // ~4.5 MB image cap
-const MODEL_FALLBACK_CHAIN = [
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-2.0-flash',
-];
 
 function parsePositiveInt(val: unknown): number {
   if (typeof val === 'number' && Number.isFinite(val)) {
     return Math.max(0, Math.round(val));
   }
   if (typeof val === 'string') {
-    const digits = val.replace(/[^\d.-]/g, '');
-    const n = Number(digits);
+    const cleaned = val.trim().replace(/Rp\.?/gi, '').replace(/\s+/g, '');
+    // Handle Indonesian thousands like "25.000" or "24,900" or "25.000,00"
+    const withoutDecimals = cleaned.replace(/[,.]00$/, '');
+    const digitsOnly = withoutDecimals.replace(/[^\d]/g, '');
+    const n = Number(digitsOnly);
     if (Number.isFinite(n)) return Math.max(0, Math.round(n));
   }
   return 0;
@@ -148,7 +147,7 @@ export async function POST(request: Request) {
     const walletGuide = wallets.map((w) => w.name).join(', ');
 
     const prompt = `Kamu adalah parser struk belanja Indonesia super akurat untuk aplikasi My Wallet.
-Analisis gambar struk / e-receipt (kafe, restoran, Indomaret/Alfamart, supermarket, SPBU, apotek, GoFood, ShopeeFood, GrabFood, Tokopedia, QRIS, dll.) lalu kembalikan HANYA JSON valid dengan struktur PERSIS berikut:
+Analisis gambar struk / e-receipt (kafe, restoran, warung makan, Indomaret/Alfamart, supermarket, SPBU, apotek, GoFood, ShopeeFood, GrabFood, Tokopedia, QRIS, dll.) lalu kembalikan HANYA JSON valid dengan struktur PERSIS berikut:
 
 {
   "merchant": "Nama toko/merchant singkat & rapi",
@@ -168,81 +167,49 @@ Analisis gambar struk / e-receipt (kafe, restoran, Indomaret/Alfamart, supermark
 }
 
 ATURAN KETAT:
-1. Semua nominal dalam INTEGER Rupiah (IDR). Ingat format Indonesia: "25.000" atau "25,000" atau "25.000,00" = 25000 (JANGAN kalikan 100 atau hapus angka nol!).
-2. "price" pada tiap item adalah TOTAL HARGA BARIS item tersebut (bukan harga satuan jika qty > 1).
-3. Pisahkan pajak (PPN, PB1, Tax), service charge, biaya kirim/ongkir, biaya layanan aplikasi ke dalam "taxOrService" (integer positif). JANGAN masukkan pajak/ongkir ke array "items".
-4. Pisahkan diskon/promo/voucher/potongan ke dalam "discount" (integer POSITIF, mis. diskon -5.000 ditulis 5000). JANGAN masukkan baris diskon ke array "items".
-5. "reportedTotal" adalah Grand Total / Total Bayar akhir yang tercetak di struk (bukan jumlah uang tunai yang dibayarkan atau kembalian).
-6. Jika gambar adalah bukti bayar singkat (seperti QRIS/e-wallet tanpa rincian item), buat 1 item dengan nama merchant atau deskripsi transaksi dan price = reportedTotal.
-7. Untuk setiap item, pilih "subcategoryId" PALING COCOK secara ketat HANYA dari daftar ID berikut (JANGAN mengarang ID baru):
+1. Semua nominal dalam INTEGER Rupiah (IDR). Format Indonesia: "25.000", "24,900", atau "25.000,00" = 25000 / 24900 (JANGAN kalikan 100 atau hapus angka nol!).
+2. "price" pada tiap item adalah TOTAL HARGA BARIS item tersebut (mis. "2 x Rp28.000 = Rp56.000" -> qty: 2, price: 56000).
+3. Tanggal format Indonesia: "24/11/26" atau "15.11.26" berarti DD/MM/YY (hari dulu lalu bulan) -> "2026-11-24" atau "2026-11-15". "19 Nov 2026" -> "2026-11-19".
+4. PAJAK / PPN INKLUSIF (SANGAT PENTING): Di struk Indomaret, Alfamart, atau minimarket Indonesia, baris "PPN: DPP= ... PPN= ..." atau "HARGA JUAL" adalah informasi pajak yang SUDAH TERMASUK dalam harga item. Jika jumlah harga seluruh item sudah sama dengan TOTAL BELANJA, set "taxOrService": 0! Hanya isi "taxOrService" jika pajak/PB1/service charge/ongkir benar-benar DITAMBAHKAN di atas subtotal item.
+5. Pisahkan diskon/promo/voucher/potongan ke dalam "discount" (integer POSITIF, mis. diskon -5.000 ditulis 5000). JANGAN masukkan baris diskon ke array "items".
+6. "reportedTotal" adalah Grand Total / Total Belanja akhir yang tercetak di struk (bukan nominal Bayar Tunai atau Kembalian).
+7. Untuk "walletHint": cek tulisan seperti "QR GOPAY" -> "GoPay", "QRIS" -> "QRIS", "Tunai" / "Cash" -> "Tunai", "ShopeePay" -> "ShopeePay", "OVO" -> "OVO", "DANA" -> "DANA".
+8. Jika gambar adalah bukti bayar singkat tanpa rincian item, buat 1 item dengan nama merchant dan price = reportedTotal.
+9. Untuk setiap item, pilih "subcategoryId" PALING COCOK secara ketat HANYA dari daftar ID berikut (JANGAN mengarang ID baru):
 ${catGuideLines.join('\n')}
-8. Daftar dompet user (sebagai konteks walletHint): ${walletGuide || 'Tunai, Bank, E-Wallet'}.`;
+10. Daftar dompet user (konteks walletHint): ${walletGuide || 'Tunai, Bank, E-Wallet'}.`;
 
-    let parsed: RawAiReceipt | null = null;
-    let usedModel = '';
-    let lastErrorText = '';
-    let hitRateLimit = false;
-
-    for (const model of MODEL_FALLBACK_CHAIN) {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { text: prompt },
-                {
-                  inline_data: {
-                    mime_type: mimeType,
-                    data: imageBase64,
-                  },
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 2048,
-            responseMimeType: 'application/json',
+    const aiRes = await callGeminiGenerateContent({
+      apiKey,
+      parts: [
+        { text: prompt },
+        {
+          inline_data: {
+            mime_type: mimeType,
+            data: imageBase64,
           },
-        }),
-      });
+        },
+      ],
+      jsonMode: true,
+      maxOutputTokens: 4096,
+    });
 
-      if (res.status === 429) {
-        hitRateLimit = true;
-        lastErrorText = `Kuota harian/menit model ${model} sedang penuh (429).`;
-        continue;
-      }
-
-      if (!res.ok) {
-        lastErrorText = `Gemini ${model} HTTP ${res.status}`;
-        continue;
-      }
-
-      const data = (await res.json()) as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-      };
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-      const obj = extractJsonObject(text);
-      if (obj) {
-        parsed = obj;
-        usedModel = model;
-        break;
-      }
-      lastErrorText = `Respons JSON dari ${model} tidak lengkap.`;
+    if (!aiRes.ok) {
+      const userMsg = aiRes.authError
+        ? `API key Gemini ditolak (${aiRes.errorSummary}). Periksa GEMINI_API_KEY di Vercel atau buat key baru di aistudio.google.com/apikey.`
+        : aiRes.rateLimited
+          ? 'Kuota gratis Gemini sedang penuh sementara. Tunggu 1 menit lalu coba scan lagi.'
+          : `Gagal menghubungi Gemini AI (${aiRes.errorSummary}). Coba lagi dalam beberapa saat.`;
+      return NextResponse.json({ error: userMsg }, { status: aiRes.status });
     }
 
+    const parsed = extractJsonObject(aiRes.text);
     if (!parsed) {
       return NextResponse.json(
         {
-          error: hitRateLimit
-            ? 'Kuota gratis Gemini sedang penuh sementara. Tunggu 1 menit lalu coba scan lagi.'
-            : `Gagal membaca struk (${lastErrorText || 'tidak terbaca'}). Pastikan foto struk terang dan tidak buram.`,
+          error: `Struk terbaca oleh ${aiRes.model}, tetapi format data belum lengkap. Coba ulangi scan.`,
         },
-        { status: hitRateLimit ? 429 : 502 }
+        { status: 502 }
       );
     }
 
@@ -255,7 +222,7 @@ ${catGuideLines.join('\n')}
       typeof parsed.walletHint === 'string' && parsed.walletHint.trim()
         ? parsed.walletHint.trim().slice(0, 40)
         : null;
-    const taxOrService = parsePositiveInt(parsed.taxOrService);
+    let taxOrService = parsePositiveInt(parsed.taxOrService);
     const discount = parsePositiveInt(parsed.discount);
     const reportedTotalRaw = parsePositiveInt(parsed.reportedTotal);
     const reportedTotal = reportedTotalRaw > 0 ? reportedTotalRaw : null;
@@ -281,6 +248,17 @@ ${catGuideLines.join('\n')}
       })
       .filter((it) => it.price > 0);
 
+    // Extra safety guard for Indonesian inclusive PPN (e.g. Indomaret/Alfamart):
+    // If items already sum exactly to reportedTotal (after discount), zero out inclusive taxOrService.
+    const itemsSum = items.reduce((s, it) => s + it.price, 0);
+    if (
+      reportedTotal &&
+      taxOrService > 0 &&
+      Math.abs(itemsSum - discount - reportedTotal) <= 10
+    ) {
+      taxOrService = 0;
+    }
+
     // Handle non-itemized receipts (e.g. QRIS payment proof) cleanly
     if (items.length === 0 && reportedTotal && reportedTotal > 0) {
       items.push({
@@ -300,7 +278,7 @@ ${catGuideLines.join('\n')}
       taxOrService,
       discount,
       reportedTotal,
-      engine: usedModel,
+      engine: aiRes.model,
     });
   } catch (err) {
     console.error('Receipt scan route error:', err);
