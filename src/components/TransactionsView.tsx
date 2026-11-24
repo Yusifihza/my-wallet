@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import {
+  Camera,
   Check,
   Copy,
   Download,
@@ -31,6 +32,7 @@ export function TransactionsView() {
     periodLabel,
     periodTransactions,
     openQuickInput,
+    openReceiptScanner,
     addTransaction,
     deleteTransaction,
     addRecurringRule,
@@ -346,6 +348,14 @@ export function TransactionsView() {
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Export CSV</span>
+              </button>
+              <button
+                type="button"
+                onClick={openReceiptScanner}
+                className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[var(--mw-surface)] hover:bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Camera className="w-3.5 h-3.5 text-[var(--mw-primary)]" />
+                <span>Scan Struk</span>
               </button>
               <button
                 type="button"

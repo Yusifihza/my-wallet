@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowLeftRight,
   Calendar,
+  Camera,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -51,6 +52,7 @@ function QuickInputSheetInner() {
     dataset,
     quickInputPreset,
     closeQuickInput,
+    openReceiptScanner,
     visibleWalletBalances,
     periodTransactions,
     recentWalletIds,
@@ -1559,6 +1561,22 @@ function QuickInputSheetInner() {
               );
             })}
           </div>
+
+          {!isEdit && tab === 'expense' && (
+            <button
+              type="button"
+              onClick={openReceiptScanner}
+              className="w-full px-3.5 py-2 rounded-2xl bg-[var(--mw-surface-2)] hover:bg-[var(--mw-surface-3)] border border-[var(--mw-border)] flex items-center justify-between gap-2 text-xs cursor-pointer transition"
+            >
+              <span className="inline-flex items-center gap-2 font-semibold text-[var(--mw-text)]">
+                <Camera className="w-4 h-4 text-[var(--mw-primary)] shrink-0" />
+                <span>Punya foto struk? Scan Otomatis pakai AI</span>
+              </span>
+              <span className="text-[11px] font-semibold text-[var(--mw-primary)] shrink-0">
+                Scan →
+              </span>
+            </button>
+          )}
 
           {/* MOBILE AMOUNT DISPLAY (Custom Numpad Driven — No Confusing Text Hint) */}
           <div className="md:hidden text-center py-1">

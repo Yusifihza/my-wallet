@@ -400,6 +400,72 @@ describe('Phase 2 & 3: Bibit Multi-Product, Shared Wedding Goal, Dummy Data, Ana
     expect(normalizeSupabaseUrl('')).toBeNull();
     expect(normalizeSupabaseKey('  sb_publishable_xyz  ')).toBe('sb_publishable_xyz');
   });
+
+  it('splits mixed supermarket receipts by category with exact proportional tax/discount reconciliation', async () => {
+    const {
+      buildReceiptTransactions,
+      calculateReceiptTotals,
+      matchSubcategoryFallback,
+      matchWalletHint,
+    } = await import('@/lib/receipt');
+    const ds = createInitialDataset('Iza', '2026-11-23');
+    const kafeSub = ds.subcategories.find((s) => s.name === 'Kafe')!.id;
+    const belSub = ds.subcategories.find((s) => s.name === 'Belanja bulanan')!.id;
+    const obatSub = ds.subcategories.find((s) => s.name === 'Obat')!.id;
+
+    const draft = {
+      merchant: 'Indomaret',
+      date: '2026-11-23',
+      walletHint: 'GOPAY QRIS',
+      suggestedWalletId: null,
+      items: [
+        { id: '1', name: 'Point Coffee Latte', qty: 1, price: 25000, subcategoryId: kafeSub },
+        { id: '2', name: 'Sabun Lifebuoy', qty: 1, price: 32500, subcategoryId: belSub },
+        { id: '3', name: 'Tisu Paseo', qty: 1, price: 17500, subcategoryId: belSub },
+        { id: '4', name: 'Tolak Angin Box', qty: 1, price: 25000, subcategoryId: obatSub },
+      ],
+      taxOrService: 3333,
+      discount: 10000,
+      reportedTotal: 93333,
+    };
+
+    const totals = calculateReceiptTotals(draft.items, draft.taxOrService, draft.discount, draft.reportedTotal);
+    expect(totals.itemsSubtotal).toBe(100000);
+    expect(totals.grandTotal).toBe(93333);
+    expect(totals.diffFromReported).toBe(0);
+
+    // Split mode must produce 3 transactions whose sum equals grandTotal EXACTLY (zero Rp1 drift)
+    const splitTxs = buildReceiptTransactions(draft, {
+      mode: 'split_by_category',
+      walletId: 'w_gopay',
+      primarySubcategoryId: belSub,
+      fallbackSubcategoryId: belSub,
+    });
+    expect(splitTxs.length).toBe(3);
+    expect(splitTxs.reduce((s, t) => s + t.amount, 0)).toBe(93333);
+
+    // Single mode produces 1 transaction with full grandTotal and itemized note
+    const singleTxs = buildReceiptTransactions(draft, {
+      mode: 'single',
+      walletId: 'w_gopay',
+      primarySubcategoryId: belSub,
+      fallbackSubcategoryId: belSub,
+    });
+    expect(singleTxs.length).toBe(1);
+    expect(singleTxs[0].amount).toBe(93333);
+    expect(singleTxs[0].note).toContain('Indomaret');
+
+    // Wallet hint and fallback categorization
+    expect(matchWalletHint('GOPAY QRIS', ds.wallets)).toBe(
+      ds.wallets.find((w) => w.name === 'GoPay')!.id
+    );
+    expect(matchSubcategoryFallback('Es Kopi Susu Fore', ds.categories, ds.subcategories)).toBe(
+      kafeSub
+    );
+    expect(matchSubcategoryFallback('Apotek Kimia Farma Vitamin C', ds.categories, ds.subcategories)).toBe(
+      obatSub
+    );
+  });
 });
 
 

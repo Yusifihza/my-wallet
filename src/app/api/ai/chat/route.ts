@@ -76,43 +76,40 @@ ${JSON.stringify(contextPayload)}
 PERTANYAAN USER:
 ${question}`;
 
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.4,
-            maxOutputTokens: 700,
-          },
-        }),
+    const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+    for (const model of models) {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.4,
+              maxOutputTokens: 700,
+            },
+          }),
+        }
+      );
+
+      if (!res.ok) continue;
+
+      const data = await res.json();
+      const geminiText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (geminiText) {
+        return NextResponse.json({
+          answer: geminiText.trim(),
+          topic: localFallback.topic,
+          engine: 'gemini',
+        });
       }
-    );
-
-    if (!res.ok) {
-      return NextResponse.json({
-        answer: localFallback.answer,
-        topic: localFallback.topic,
-        engine: 'local_fallback',
-      });
-    }
-
-    const data = await res.json();
-    const geminiText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!geminiText) {
-      return NextResponse.json({
-        answer: localFallback.answer,
-        topic: localFallback.topic,
-        engine: 'local_fallback',
-      });
     }
 
     return NextResponse.json({
-      answer: geminiText.trim(),
+      answer: localFallback.answer,
       topic: localFallback.topic,
-      engine: 'gemini',
+      engine: 'local_fallback',
     });
   } catch {
     return NextResponse.json(

@@ -98,6 +98,10 @@ interface WalletContextValue {
   quickInputPreset: QuickInputPreset | null;
   openQuickInput: (preset?: QuickInputPreset) => void;
   closeQuickInput: () => void;
+  // Receipt Scanner modal
+  receiptScannerOpen: boolean;
+  openReceiptScanner: () => void;
+  closeReceiptScanner: () => void;
   // Toast
   toast: ToastMessage | null;
   dismissToast: () => void;
@@ -113,6 +117,7 @@ interface WalletContextValue {
   signOut: () => Promise<void>;
   // Mutations — Phase 1
   addTransaction: (tx: Omit<Transaction, 'id' | 'createdAt'>) => void;
+  addTransactionsBatch: (txs: Omit<Transaction, 'id' | 'createdAt'>[], batchLabel?: string) => void;
   updateTransaction: (tx: Transaction) => void;
   deleteTransaction: (txId: string) => void;
   reconcileWallet: (walletId: string, actualBalance: number, note?: string) => void;
@@ -181,6 +186,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [recentWalletIds, setRecentWalletIds] = useState<string[]>(['w_gopay', 'w_jago', 'w_tunai']);
   const [quickInputOpen, setQuickInputOpen] = useState(false);
   const [quickInputPreset, setQuickInputPreset] = useState<QuickInputPreset | null>(null);
+  const [receiptScannerOpen, setReceiptScannerOpen] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
   const showToast = useCallback((text: string, undo?: () => void) => {
@@ -503,6 +509,57 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       dataset.profile.privacyMode,
       showToast,
     ]
+  );
+
+  const addTransactionsBatch = useCallback(
+    (inputs: Omit<Transaction, 'id' | 'createdAt'>[], batchLabel = 'Scan Struk') => {
+      if (inputs.length === 0) return;
+      const nowIso = new Date().toISOString();
+      const created: Transaction[] = inputs.map((inp) => ({
+        ...inp,
+        id: generateUUID(),
+        createdAt: nowIso,
+      }));
+      const createdIds = new Set(created.map((t) => t.id));
+      const totalAmt = created.reduce((s, t) => s + Math.abs(t.amount), 0);
+      const firstWalletId = created[0].walletId;
+
+      commitDataset((prev) => ({
+        ...prev,
+        transactions: [...created, ...prev.transactions],
+      }));
+
+      if (firstWalletId) {
+        setRecentWalletIds((prev) =>
+          [firstWalletId, ...prev.filter((id) => id !== firstWalletId)].slice(0, 3)
+        );
+      }
+
+      if (authMode === 'supabase' && cloudUserId) {
+        getSupabaseBrowserClient()
+          ?.from('transactions')
+          .insert(created.map((tx) => mapTxToDb(tx, cloudUserId)))
+          .then(() => {});
+      }
+
+      showToast(
+        `${created.length} transaksi (${batchLabel} · ${formatIDR(totalAmt, dataset.profile.privacyMode)}) tersimpan`,
+        () => {
+          commitDataset((prev) => ({
+            ...prev,
+            transactions: prev.transactions.filter((t) => !createdIds.has(t.id)),
+          }));
+          if (authMode === 'supabase' && cloudUserId) {
+            getSupabaseBrowserClient()
+              ?.from('transactions')
+              .delete()
+              .in('id', [...createdIds])
+              .then(() => {});
+          }
+        }
+      );
+    },
+    [authMode, cloudUserId, commitDataset, dataset.profile.privacyMode, showToast]
   );
 
   const updateTransaction = useCallback(
@@ -1392,6 +1449,15 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setQuickInputPreset(null);
   }, []);
 
+  const openReceiptScanner = useCallback(() => {
+    setQuickInputOpen(false);
+    setReceiptScannerOpen(true);
+  }, []);
+
+  const closeReceiptScanner = useCallback(() => {
+    setReceiptScannerOpen(false);
+  }, []);
+
   const value: WalletContextValue = {
     loading,
     nowDate: clientNow ?? SSR_FALLBACK_DATE,
@@ -1411,6 +1477,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     quickInputPreset,
     openQuickInput,
     closeQuickInput,
+    receiptScannerOpen,
+    openReceiptScanner,
+    closeReceiptScanner,
     toast,
     dismissToast: () => setToast(null),
     signInWithGoogle,
@@ -1419,6 +1488,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     continueLocalMode,
     signOut,
     addTransaction,
+    addTransactionsBatch,
     updateTransaction,
     deleteTransaction,
     reconcileWallet,

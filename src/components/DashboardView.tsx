@@ -6,6 +6,7 @@ import {
   ArrowDownLeft,
   ArrowLeftRight,
   ArrowUpRight,
+  Camera,
   ChevronLeft,
   ChevronRight,
   FlaskConical,
@@ -48,6 +49,7 @@ export function DashboardView() {
     visibleWalletBalances,
     netWorth,
     openQuickInput,
+    openReceiptScanner,
     loadThreeMonthDummyData,
   } = useWallet();
 
@@ -160,7 +162,15 @@ export function DashboardView() {
             Ringkasan {periodLabel}
           </h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={openReceiptScanner}
+            className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[var(--mw-surface)] hover:bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] inline-flex items-center gap-1.5 cursor-pointer transition"
+          >
+            <Camera className="w-3.5 h-3.5 text-[var(--mw-primary)]" />
+            <span>Scan Struk</span>
+          </button>
           <button
             type="button"
             onClick={() => openQuickInput({ mode: 'create', type: 'transfer' })}

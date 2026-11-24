@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import {
   ArrowLeftRight,
   BarChart3,
+  Camera,
   Cloud,
   Eye,
   EyeOff,
@@ -26,6 +27,7 @@ import {
 import { AuthScreen } from '@/components/AuthScreen';
 import { OnboardingWizard } from '@/components/OnboardingWizard';
 import { QuickInputSheet } from '@/components/QuickInputSheet';
+import { ReceiptScannerModal } from '@/components/ReceiptScannerModal';
 import { WalletLogo } from '@/components/WalletLogo';
 import { useWallet } from '@/context/WalletContext';
 import { buildPeriodOptions } from '@/lib/finance';
@@ -51,6 +53,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     period,
     setPeriod,
     openQuickInput,
+    openReceiptScanner,
     toast,
     dismissToast,
     setTheme,
@@ -179,6 +182,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <button
             type="button"
+            onClick={openReceiptScanner}
+            className="w-full py-2.5 px-3 rounded-2xl text-xs font-semibold bg-[var(--mw-surface-2)] hover:bg-[var(--mw-surface-3)] border border-[var(--mw-border)] text-[var(--mw-text)] flex items-center justify-center gap-2 cursor-pointer transition"
+            title="Scan Struk AI"
+          >
+            <Camera className="w-4 h-4 text-[var(--mw-primary)] shrink-0" />
+            <span className="hidden xl:inline">Scan Struk AI</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => openQuickInput({ mode: 'create' })}
             className="w-full py-3 px-3 rounded-2xl text-sm font-semibold text-white flex items-center justify-center gap-2 cursor-pointer transition shadow-sm"
             style={{ background: 'var(--mw-primary)' }}
@@ -225,6 +238,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           {/* Right Utility Controls */}
           <div className="flex items-center gap-1.5 sm:gap-2">
+            <button
+              type="button"
+              onClick={openReceiptScanner}
+              aria-label="Scan Struk AI"
+              title="Scan Struk AI"
+              className="w-9 h-9 rounded-xl bg-[var(--mw-surface-2)] hover:bg-[var(--mw-surface-3)] border border-[var(--mw-border)] flex items-center justify-center text-[var(--mw-primary)] cursor-pointer transition"
+            >
+              <Camera className="w-4 h-4" />
+            </button>
+
             <button
               type="button"
               onClick={togglePrivacyMode}
@@ -351,6 +374,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <X className="w-4 h-4" />
               </button>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                openReceiptScanner();
+              }}
+              className="w-full p-3.5 rounded-2xl border flex items-center justify-center gap-2 text-sm font-semibold text-white cursor-pointer"
+              style={{ background: 'var(--mw-primary)', borderColor: 'var(--mw-primary)' }}
+            >
+              <Camera className="w-4 h-4 shrink-0" />
+              <span>Scan Struk AI (Kamera / Galeri)</span>
+            </button>
             <div className="grid grid-cols-2 gap-2.5">
               {[
                 { href: '/wallets', label: 'Wallet & Bibit', icon: Wallet },
@@ -386,6 +421,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* GLOBAL QUICK INPUT SHEET */}
       <QuickInputSheet />
+
+      {/* GLOBAL RECEIPT SCANNER MODAL */}
+      <ReceiptScannerModal />
 
       {/* UNDO TOAST */}
       {toastBanner}
