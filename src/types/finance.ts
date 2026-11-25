@@ -75,6 +75,7 @@ export interface WalletValuation {
 
 export interface InvestmentProduct {
   id: string;
+  ownerId?: string;
   walletId: string;
   goalId: string | null; // e.g., goal_wedding or null (personal)
   name: string; // e.g., Pasar Uang (PU), Obligasi, Reksa Saham, Saham, SBN
@@ -110,6 +111,9 @@ export interface Subcategory {
 
 export interface Goal {
   id: string;
+  ownerId?: string;
+  sharedRole?: 'owner' | 'member';
+  ownerName?: string;
   name: string;
   icon: string;
   targetAmount: number;
@@ -125,12 +129,27 @@ export interface Goal {
 export interface GoalContribution {
   id: string;
   goalId: string;
+  contributorUserId?: string | null;
   contributorName: string;
   isPartner: boolean;
   amount: number;
   date: string; // YYYY-MM-DD
   productName?: string; // e.g. Pasar Uang (PU), Obligasi, SBN
   note: string;
+}
+
+export interface SharedGoalPeerData {
+  goalId: string;
+  ownerId: string;
+  ownerName: string;
+  memberId: string | null;
+  memberName: string | null;
+  sharePercent: number;
+  viewerRole: 'owner' | 'member';
+  /** Bibit products linked to this goal owned by the OTHER person (never mixed into personal Net Worth) */
+  peerProducts: InvestmentProduct[];
+  /** Non-product saving tx net total logged by the OTHER person */
+  peerTxSaved: number;
 }
 
 export interface GoalInvite {
@@ -229,6 +248,7 @@ export interface AppDataset {
   investmentProducts: InvestmentProduct[];
   goalContributions: GoalContribution[];
   goalInvites: GoalInvite[];
+  sharedGoalPeers?: Record<string, SharedGoalPeerData>;
   recurringRules: RecurringRule[];
   aiMemory: AIMemory;
   sheetsSync: SheetsSyncConfig;

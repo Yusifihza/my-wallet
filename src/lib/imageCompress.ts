@@ -8,12 +8,13 @@ export interface CompressedImageResult {
 
 /**
  * Compresses and resizes a receipt image in the browser using Canvas so that
- * camera photos (3-8 MB) become crisp ~150-300 KB JPEGs ideal for fast Gemini Vision OCR.
+ * camera photos (3-8 MB) become crisp ~60-120 KB JPEGs ideal for fast Gemini Vision OCR
+ * even on slower 3G/4G connections.
  */
 export function compressReceiptImage(
   file: File,
-  maxDimension = 1400,
-  quality = 0.84
+  maxDimension = 1024,
+  quality = 0.76
 ): Promise<CompressedImageResult> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

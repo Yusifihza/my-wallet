@@ -1104,6 +1104,11 @@ export function WalletsView() {
                     {dataset.goals.map((g) => (
                       <option key={g.id} value={g.id}>
                         {g.name}
+                        {g.sharedRole === 'member'
+                          ? ` (Bersama · Milik ${g.ownerName || 'Pasangan'})`
+                          : g.isShared
+                            ? ' (Bersama)'
+                            : ''}
                       </option>
                     ))}
                   </select>

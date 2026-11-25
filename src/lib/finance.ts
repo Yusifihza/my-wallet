@@ -8,6 +8,7 @@ import type {
   PeriodPreset,
   PeriodSummary,
   RecurringRule,
+  SharedGoalPeerData,
   Subcategory,
   Transaction,
   Wallet,
@@ -623,12 +624,35 @@ export function calculateZeroBasedAllocation(
 
 // ==================== GOALS PROGRESS ====================
 
+const INVITE_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/** Generates a human-friendly unique invite code like MW-4K9P-7X */
+export function generateInviteCode(): string {
+  const pick = (len: number) => {
+    let out = '';
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+      const bytes = new Uint8Array(len);
+      crypto.getRandomValues(bytes);
+      for (let i = 0; i < len; i++) {
+        out += INVITE_CODE_ALPHABET[bytes[i] % INVITE_CODE_ALPHABET.length];
+      }
+      return out;
+    }
+    for (let i = 0; i < len; i++) {
+      out += INVITE_CODE_ALPHABET[Math.floor(Math.random() * INVITE_CODE_ALPHABET.length)];
+    }
+    return out;
+  };
+  return `MW-${pick(4)}-${pick(2)}`;
+}
+
 export function calculateGoalProgress(
   goal: Goal,
   transactions: Transaction[],
   referenceDate = new Date(),
   contributions: GoalContribution[] = [],
-  investmentProducts: InvestmentProduct[] = []
+  investmentProducts: InvestmentProduct[] = [],
+  sharedPeer?: SharedGoalPeerData
 ) {
   const linkedProducts = investmentProducts.filter((p) => p.goalId === goal.id);
   const linkedProductIds = new Set(linkedProducts.map((p) => p.id));
@@ -636,24 +660,48 @@ export function calculateGoalProgress(
   const productInvestedTotal = linkedProducts.reduce((s, p) => s + Math.max(0, p.investedAmount), 0);
   const hasActiveProducts = productMarketTotal > 0 || productInvestedTotal > 0;
 
-  let txSaved = 0;
+  let ownTxSaved = 0;
   for (const tx of transactions) {
     if (tx.goalId !== goal.id) continue;
     // Avoid double-counting deposits already tracked in linked investment product values
     if (hasActiveProducts && tx.investmentProductId && linkedProductIds.has(tx.investmentProductId)) {
       continue;
     }
-    if (tx.type === 'saving') txSaved += tx.amount;
-    else if (tx.type === 'saving_withdrawal') txSaved -= tx.amount;
+    if (tx.type === 'saving') ownTxSaved += tx.amount;
+    else if (tx.type === 'saving_withdrawal') ownTxSaved -= tx.amount;
   }
 
-  const mySaved = Math.max(0, txSaved + productMarketTotal);
-  const partnerSaved = Math.max(
-    0,
-    contributions
-      .filter((c) => c.goalId === goal.id && c.isPartner)
-      .reduce((s, c) => s + c.amount, 0)
+  const peerLinkedProducts = sharedPeer?.peerProducts ?? [];
+  const peerProductMarketTotal = peerLinkedProducts.reduce(
+    (s, p) => s + Math.max(0, p.marketValue),
+    0
   );
+  const peerProductInvestedTotal = peerLinkedProducts.reduce(
+    (s, p) => s + Math.max(0, p.investedAmount),
+    0
+  );
+  const peerTxSaved = sharedPeer?.peerTxSaved ?? 0;
+
+  const goalContribs = contributions.filter((c) => c.goalId === goal.id);
+  const partnerManualContrib = goalContribs
+    .filter((c) => c.isPartner)
+    .reduce((s, c) => s + c.amount, 0);
+  const ownerManualContrib = goalContribs
+    .filter((c) => !c.isPartner)
+    .reduce((s, c) => s + c.amount, 0);
+
+  const viewerRole = sharedPeer?.viewerRole ?? goal.sharedRole ?? 'owner';
+  const ownDirect = Math.max(0, ownTxSaved + productMarketTotal);
+  const peerDirect = Math.max(0, peerTxSaved + peerProductMarketTotal);
+
+  const mySaved =
+    viewerRole === 'member'
+      ? Math.max(0, ownDirect + partnerManualContrib)
+      : Math.max(0, ownDirect + ownerManualContrib);
+  const partnerSaved =
+    viewerRole === 'member'
+      ? Math.max(0, peerDirect + ownerManualContrib)
+      : Math.max(0, peerDirect + partnerManualContrib);
   const saved = mySaved + partnerSaved;
 
   const pct = goal.targetAmount > 0 ? Math.min(100, Math.round((saved / goal.targetAmount) * 100)) : 0;
@@ -674,7 +722,10 @@ export function calculateGoalProgress(
     partnerSaved,
     myInvested: productInvestedTotal,
     myMarketGain: productMarketTotal - productInvestedTotal,
+    partnerInvested: peerProductInvestedTotal,
+    partnerMarketGain: peerProductMarketTotal - peerProductInvestedTotal,
     linkedProducts,
+    peerLinkedProducts,
     pct,
     remaining,
     monthsLeft,
@@ -1097,7 +1148,14 @@ export function buildGoogleSheetsPayload(dataset: AppDataset, referenceDate = ne
   const goalRows = [
     ['Goal', 'Bersama', 'Target', 'Kontribusi Aku', 'Kontribusi Pasangan', 'Total Terkumpul', 'Progres (%)', 'Deadline'],
     ...dataset.goals.map((g) => {
-      const pr = calculateGoalProgress(g, dataset.transactions, referenceDate, dataset.goalContributions, dataset.investmentProducts);
+      const pr = calculateGoalProgress(
+        g,
+        dataset.transactions,
+        referenceDate,
+        dataset.goalContributions,
+        dataset.investmentProducts,
+        dataset.sharedGoalPeers?.[g.id]
+      );
       return [g.name, g.isShared ? 'Ya' : 'Tidak', g.targetAmount, pr.mySaved, pr.partnerSaved, pr.saved, `${pr.pct}%`, g.deadline ?? '-'];
     }),
   ];

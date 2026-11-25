@@ -6,6 +6,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { applyThreeMonthDummyData, clearDummyData } from '@/lib/dummyData';
@@ -16,12 +17,15 @@ import {
   calculateWalletBalances,
   filterTransactionsByRange,
   formatIDR,
+  generateInviteCode,
   getPeriodRange,
 } from '@/lib/finance';
 import { createInitialDataset, todayISO } from '@/lib/seed';
 import {
   generateUUID,
   isLocalModeOptedIn,
+  joinSharedGoalByCode,
+  leaveSharedGoalById,
   loadLocalDataset,
   loadSupabaseDataset,
   mapContributionToDb,
@@ -80,6 +84,7 @@ export interface AuthActionResult {
 
 interface WalletContextValue {
   loading: boolean;
+  syncingCloud: boolean;
   nowDate: Date;
   authMode: 'unauthenticated' | 'local' | 'supabase';
   supabaseConfigured: boolean;
@@ -115,6 +120,7 @@ interface WalletContextValue {
   ) => Promise<AuthActionResult>;
   continueLocalMode: () => void;
   signOut: () => Promise<void>;
+  refreshCloudData: (silent?: boolean) => Promise<void>;
   // Mutations — Phase 1
   addTransaction: (tx: Omit<Transaction, 'id' | 'createdAt'>) => void;
   addTransactionsBatch: (txs: Omit<Transaction, 'id' | 'createdAt'>[], batchLabel?: string) => void;
@@ -142,6 +148,8 @@ interface WalletContextValue {
   addGoal: (goal: Omit<Goal, 'id' | 'priority' | 'status'>) => void;
   updateGoal: (goal: Goal) => void;
   deleteGoal: (goalId: string) => void;
+  joinSharedGoal: (code: string) => Promise<{ ok: boolean; error?: string; message?: string }>;
+  leaveSharedGoal: (goalId: string) => Promise<void>;
   addValuation: (walletId: string, marketValue: number, date?: string) => void;
   setTheme: (theme: ThemePreference) => void;
   togglePrivacyMode: () => void;
@@ -158,7 +166,7 @@ interface WalletContextValue {
   deleteInvestmentProduct: (productId: string) => void;
   addGoalContribution: (contrib: Omit<GoalContribution, 'id'>) => void;
   deleteGoalContribution: (contribId: string) => void;
-  saveGoalInvite: (invite: GoalInvite) => void;
+  saveGoalInvite: (invite: GoalInvite, options?: { silent?: boolean }) => void;
   addRecurringRule: (rule: Omit<RecurringRule, 'id'>) => void;
   updateRecurringRule: (rule: RecurringRule) => void;
   toggleRecurringRule: (ruleId: string) => void;
@@ -178,6 +186,7 @@ const SSR_FALLBACK_DATE = new Date('2026-01-01T00:00:00.000Z');
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const supabaseConfigured = isSupabaseConfigured();
   const [loading, setLoading] = useState(true);
+  const [syncingCloud, setSyncingCloud] = useState(false);
   const [authMode, setAuthMode] = useState<'unauthenticated' | 'local' | 'supabase'>('unauthenticated');
   const [cloudUserId, setCloudUserId] = useState<string | null>(null);
   const [dataset, setDataset] = useState<AppDataset>(() => createInitialDataset());
@@ -188,6 +197,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [quickInputPreset, setQuickInputPreset] = useState<QuickInputPreset | null>(null);
   const [receiptScannerOpen, setReceiptScannerOpen] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const lastCloudSyncRef = useRef<number>(0);
 
   const showToast = useCallback((text: string, undo?: () => void) => {
     const id = generateUUID();
@@ -243,6 +253,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
               avatarUrl: session.user.user_metadata?.avatar_url,
             });
             if (!active) return;
+            lastCloudSyncRef.current = Date.now();
             setClientNow(now);
             setCloudUserId(session.user.id);
             setDataset(loaded);
@@ -273,6 +284,57 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       active = false;
     };
   }, []);
+
+  const refreshCloudData = useCallback(
+    async (silent = false) => {
+      if (authMode !== 'supabase' || !cloudUserId) return;
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) return;
+      setSyncingCloud(true);
+      try {
+        const loaded = await loadSupabaseDataset(supabase, cloudUserId, {
+          name: dataset.profile.displayName,
+          email: dataset.profile.email,
+          avatarUrl: dataset.profile.avatarUrl,
+        });
+        lastCloudSyncRef.current = Date.now();
+        setDataset(loaded);
+        if (!silent) {
+          showToast('Data cloud & Goal Bersama diperbarui');
+        }
+      } catch {
+        if (!silent) {
+          showToast('Gagal memuat ulang data cloud. Cek koneksi internetmu.');
+        }
+      } finally {
+        setSyncingCloud(false);
+      }
+    },
+    [
+      authMode,
+      cloudUserId,
+      dataset.profile.avatarUrl,
+      dataset.profile.displayName,
+      dataset.profile.email,
+      showToast,
+    ]
+  );
+
+  // Throttled auto-refresh when returning to the app so partner's updates appear seamlessly
+  useEffect(() => {
+    if (authMode !== 'supabase' || !cloudUserId) return;
+    const maybeSync = () => {
+      if (document.visibilityState === 'hidden') return;
+      if (Date.now() - lastCloudSyncRef.current < 20_000) return;
+      void refreshCloudData(true);
+    };
+    window.addEventListener('focus', maybeSync);
+    document.addEventListener('visibilitychange', maybeSync);
+    return () => {
+      window.removeEventListener('focus', maybeSync);
+      document.removeEventListener('visibilitychange', maybeSync);
+    };
+  }, [authMode, cloudUserId, refreshCloudData]);
 
   // Desktop global shortcut: N to open Quick Input
   useEffect(() => {
@@ -867,18 +929,39 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       const goal: Goal = {
         ...input,
         id: generateUUID(),
+        ownerId: cloudUserId ?? undefined,
+        sharedRole: 'owner',
         priority: dataset.goals.length + 1,
         status: 'active',
       };
+      const autoInvite: GoalInvite | null = goal.isShared
+        ? {
+            goalId: goal.id,
+            code: generateInviteCode(),
+            partnerName: 'Pasangan',
+            partnerEmail: '',
+            sharePercent: 50,
+            status: 'pending',
+          }
+        : null;
       commitDataset((prev) => ({
         ...prev,
         goals: [...prev.goals, goal],
+        goalInvites: autoInvite ? [...prev.goalInvites, autoInvite] : prev.goalInvites,
       }));
       if (authMode === 'supabase' && cloudUserId) {
-        getSupabaseBrowserClient()
+        const supabase = getSupabaseBrowserClient();
+        supabase
           ?.from('goals')
           .insert(mapGoalToDb(goal, cloudUserId))
-          .then(() => {});
+          .then(({ error }) => {
+            if (!error && autoInvite) {
+              supabase
+                .from('goal_invites')
+                .upsert(mapInviteToDb(autoInvite, cloudUserId))
+                .then(() => {});
+            }
+          });
       }
       showToast(`Target "${goal.name}" dibuat`);
     },
@@ -916,6 +999,56 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     [authMode, cloudUserId, commitDataset, showToast]
   );
 
+  const joinSharedGoal = useCallback(
+    async (code: string): Promise<{ ok: boolean; error?: string; message?: string }> => {
+      if (authMode !== 'supabase' || !cloudUserId) {
+        return {
+          ok: false,
+          error:
+            'Fitur gabung Goal lintas akun butuh login akun cloud (Supabase). Silakan masuk dengan akunmu dulu ya.',
+        };
+      }
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) {
+        return { ok: false, error: 'Koneksi Supabase tidak tersedia.' };
+      }
+      const res = await joinSharedGoalByCode(supabase, code);
+      if (!res.ok) {
+        return { ok: false, error: res.error };
+      }
+      await refreshCloudData(true);
+      const msg = `Berhasil gabung ke goal "${res.goalName || 'Bersama'}" milik ${res.ownerName || 'Pasangan'}!`;
+      showToast(msg);
+      return { ok: true, message: msg };
+    },
+    [authMode, cloudUserId, refreshCloudData, showToast]
+  );
+
+  const leaveSharedGoal = useCallback(
+    async (goalId: string) => {
+      if (authMode !== 'supabase' || !cloudUserId) return;
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) return;
+      const res = await leaveSharedGoalById(supabase, goalId);
+      if (!res.ok) {
+        showToast(res.error || 'Gagal keluar dari goal bersama');
+        return;
+      }
+      commitDataset((prev) => {
+        const nextPeers = { ...(prev.sharedGoalPeers ?? {}) };
+        delete nextPeers[goalId];
+        return {
+          ...prev,
+          goals: prev.goals.filter((g) => g.id !== goalId),
+          sharedGoalPeers: nextPeers,
+        };
+      });
+      showToast('Kamu keluar dari goal bersama');
+      void refreshCloudData(true);
+    },
+    [authMode, cloudUserId, commitDataset, refreshCloudData, showToast]
+  );
+
   const addValuation = useCallback(
     (walletId: string, marketValue: number, date = todayISO()) => {
       const val = { id: generateUUID(), walletId, date, marketValue: Math.round(marketValue) };
@@ -950,6 +1083,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       const prod: InvestmentProduct = {
         ...input,
         id: generateUUID(),
+        ownerId: cloudUserId ?? undefined,
         investedAmount: Math.round(Math.max(0, input.investedAmount)),
         marketValue: Math.round(Math.max(0, input.marketValue)),
         updatedAt: today,
@@ -1061,6 +1195,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       const contrib: GoalContribution = {
         ...input,
         id: generateUUID(),
+        contributorUserId: input.contributorUserId ?? cloudUserId ?? null,
         amount: Math.round(Math.max(0, input.amount)),
       };
       commitDataset((prev) => ({
@@ -1068,10 +1203,18 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         goalContributions: [contrib, ...prev.goalContributions],
       }));
       if (authMode === 'supabase' && cloudUserId) {
-        getSupabaseBrowserClient()
+        const supabase = getSupabaseBrowserClient();
+        supabase
           ?.from('goal_contributions')
-          .insert(mapContributionToDb(contrib, cloudUserId))
-          .then(() => {});
+          .insert(mapContributionToDb(contrib, cloudUserId, true))
+          .then(({ error }) => {
+            if (error && (error.message || '').toLowerCase().includes('contributor_user_id')) {
+              supabase
+                .from('goal_contributions')
+                .insert(mapContributionToDb(contrib, cloudUserId, false))
+                .then(() => {});
+            }
+          });
       }
       showToast(
         `Setoran ${contrib.contributorName} (${formatIDR(contrib.amount, dataset.profile.privacyMode)}) dicatat`
@@ -1099,23 +1242,30 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   );
 
   const saveGoalInvite = useCallback(
-    (invite: GoalInvite) => {
+    (invite: GoalInvite, options?: { silent?: boolean }) => {
+      const rawCode = invite.code.trim().toUpperCase();
+      const normalized: GoalInvite = {
+        ...invite,
+        code: !rawCode || rawCode === 'MW-WED-2027' ? generateInviteCode() : rawCode,
+      };
       commitDataset((prev) => {
-        const exists = prev.goalInvites.some((i) => i.goalId === invite.goalId);
+        const exists = prev.goalInvites.some((i) => i.goalId === normalized.goalId);
         return {
           ...prev,
           goalInvites: exists
-            ? prev.goalInvites.map((i) => (i.goalId === invite.goalId ? invite : i))
-            : [...prev.goalInvites, invite],
+            ? prev.goalInvites.map((i) => (i.goalId === normalized.goalId ? normalized : i))
+            : [...prev.goalInvites, normalized],
         };
       });
       if (authMode === 'supabase' && cloudUserId) {
         getSupabaseBrowserClient()
           ?.from('goal_invites')
-          .upsert(mapInviteToDb(invite, cloudUserId))
+          .upsert(mapInviteToDb(normalized, cloudUserId))
           .then(() => {});
       }
-      showToast('Pengaturan berbagi pasangan disimpan');
+      if (!options?.silent) {
+        showToast('Pengaturan berbagi pasangan disimpan');
+      }
     },
     [authMode, cloudUserId, commitDataset, showToast]
   );
@@ -1460,6 +1610,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   const value: WalletContextValue = {
     loading,
+    syncingCloud,
     nowDate: clientNow ?? SSR_FALLBACK_DATE,
     authMode,
     supabaseConfigured,
@@ -1487,6 +1638,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     signUpWithEmail,
     continueLocalMode,
     signOut,
+    refreshCloudData,
     addTransaction,
     addTransactionsBatch,
     updateTransaction,
@@ -1502,6 +1654,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     addGoal,
     updateGoal,
     deleteGoal,
+    joinSharedGoal,
+    leaveSharedGoal,
     addValuation,
     setTheme,
     togglePrivacyMode,

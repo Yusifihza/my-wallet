@@ -198,7 +198,8 @@ export function generateFinancialInsights(
       dataset.transactions,
       referenceDate,
       dataset.goalContributions,
-      dataset.investmentProducts
+      dataset.investmentProducts,
+      dataset.sharedGoalPeers?.[weddingGoal.id]
     );
     cards.push({
       id: 'wedding_goal',
@@ -315,7 +316,8 @@ export function answerFinancialQuestion(
       dataset.transactions,
       referenceDate,
       dataset.goalContributions,
-      dataset.investmentProducts
+      dataset.investmentProducts,
+      dataset.sharedGoalPeers?.[wedding.id]
     );
     const halfReq = pr.requiredPerMonth ? Math.ceil(pr.requiredPerMonth / 2) : 0;
     return {

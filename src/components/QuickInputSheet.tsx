@@ -165,16 +165,25 @@ function QuickInputSheetInner() {
   const [subId, setSubId] = useState<string | null>(() => {
     if (editTx) return editTx.subcategoryId;
     if (initialTab === 'transfer') return null;
-    if (quickInputPreset?.subcategoryId) return quickInputPreset.subcategoryId;
+    if (
+      quickInputPreset?.subcategoryId &&
+      dataset.subcategories.some((s) => s.id === quickInputPreset.subcategoryId)
+    ) {
+      return quickInputPreset.subcategoryId;
+    }
     if (initialTab === 'saving' && quickInputPreset?.goalId) {
       const g = dataset.goals.find((x) => x.id === quickInputPreset.goalId);
-      if (g?.subcategoryId) return g.subcategoryId;
+      if (g?.subcategoryId && dataset.subcategories.some((s) => s.id === g.subcategoryId)) {
+        return g.subcategoryId;
+      }
     }
     return getDefaultSubForType(initialTab);
   });
   const [walletId, setWalletId] = useState<string>(() => {
     if (editTx) return editTx.walletId;
-    if (quickInputPreset?.walletId) return quickInputPreset.walletId;
+    if (quickInputPreset?.walletId && visibleWallets.some((w) => w.id === quickInputPreset.walletId)) {
+      return quickInputPreset.walletId;
+    }
     if (initialTab === 'transfer' || initialTab === 'saving' || initialTab === 'income') {
       return defaultBankWalletId;
     }
@@ -182,7 +191,9 @@ function QuickInputSheetInner() {
   });
   const [toWalletId, setToWalletId] = useState<string>(() => {
     if (editTx) return editTx.toWalletId || defaultInvestWalletId;
-    if (quickInputPreset?.toWalletId) return quickInputPreset.toWalletId;
+    if (quickInputPreset?.toWalletId && visibleWallets.some((w) => w.id === quickInputPreset.toWalletId)) {
+      return quickInputPreset.toWalletId;
+    }
     if (initialTab === 'transfer') {
       const from = quickInputPreset?.walletId || defaultBankWalletId;
       return (
@@ -193,7 +204,7 @@ function QuickInputSheetInner() {
     }
     if (initialTab === 'saving' && quickInputPreset?.goalId) {
       const g = dataset.goals.find((x) => x.id === quickInputPreset.goalId);
-      if (g?.walletId) return g.walletId;
+      if (g?.walletId && visibleWallets.some((w) => w.id === g.walletId)) return g.walletId;
     }
     return defaultInvestWalletId;
   });
@@ -1122,7 +1133,9 @@ function QuickInputSheetInner() {
                   type="button"
                   onClick={() => {
                     setGoalId(g.id);
-                    if (g.subcategoryId) setSubId(g.subcategoryId);
+                    if (g.subcategoryId && dataset.subcategories.some((s) => s.id === g.subcategoryId)) {
+                      setSubId(g.subcategoryId);
+                    }
                     if (g.walletId && visibleWallets.some((w) => w.id === g.walletId)) {
                       setToWalletId(g.walletId);
                     }
@@ -1143,7 +1156,12 @@ function QuickInputSheetInner() {
                     </div>
                     <div className="min-w-0">
                       <div className="text-sm font-semibold text-[var(--mw-text)] truncate">
-                        {g.name} {g.isShared ? '· Bersama' : ''}
+                        {g.name}{' '}
+                        {g.sharedRole === 'member'
+                          ? `· Milik ${g.ownerName || 'Pasangan'}`
+                          : g.isShared
+                            ? '· Bersama'
+                            : ''}
                       </div>
                       <div className="text-xs text-[var(--mw-text-muted)] tab-num">
                         Target {formatIDR(g.targetAmount, privacy)}

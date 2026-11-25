@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { generateInviteCode } from '@/lib/finance';
 import {
   createInitialDataset,
   createSeedCategories,
@@ -18,6 +19,7 @@ import type {
   InvestmentProduct,
   QuickTemplate,
   RecurringRule,
+  SharedGoalPeerData,
   SheetsSyncConfig,
   Subcategory,
   Transaction,
@@ -170,8 +172,6 @@ export async function loadSupabaseDataset(
     valRes,
     tplRes,
     prodRes,
-    contribRes,
-    inviteRes,
     recRes,
     memRes,
     sheetsRes,
@@ -179,7 +179,8 @@ export async function loadSupabaseDataset(
     supabase.from('wallets').select('*').eq('owner_id', userId).order('sort_order'),
     supabase.from('categories').select('*').eq('owner_id', userId).order('sort_order'),
     supabase.from('subcategories').select('*').eq('owner_id', userId).order('sort_order'),
-    supabase.from('goals').select('*').eq('owner_id', userId).order('priority'),
+    // RLS returns own goals + shared goals the user joined as a member
+    supabase.from('goals').select('*').order('priority'),
     supabase
       .from('transactions')
       .select('*')
@@ -188,9 +189,8 @@ export async function loadSupabaseDataset(
       .order('created_at', { ascending: false }),
     supabase.from('wallet_valuations').select('*').eq('owner_id', userId).order('date', { ascending: false }),
     supabase.from('templates').select('*').eq('owner_id', userId).order('sort_order'),
-    supabase.from('investment_products').select('*').eq('owner_id', userId).order('sort_order'),
-    supabase.from('goal_contributions').select('*').eq('owner_id', userId).order('date', { ascending: false }),
-    supabase.from('goal_invites').select('*').eq('owner_id', userId),
+    // RLS returns own products + peer products linked to accessible shared goals
+    supabase.from('investment_products').select('*').order('sort_order'),
     supabase.from('recurring_rules').select('*').eq('owner_id', userId).order('next_run'),
     supabase.from('ai_memory').select('*').eq('owner_id', userId).maybeSingle(),
     supabase.from('sheets_sync').select('*').eq('owner_id', userId).maybeSingle(),
@@ -199,13 +199,25 @@ export async function loadSupabaseDataset(
   let wallets: Wallet[] = (walletsRes.data ?? []).map(mapWalletFromDb);
   let categories: Category[] = (catsRes.data ?? []).map(mapCategoryFromDb);
   let subcategories: Subcategory[] = (subsRes.data ?? []).map(mapSubFromDb);
-  let goals: Goal[] = (goalsRes.data ?? []).map(mapGoalFromDb);
+  let goals: Goal[] = (goalsRes.data ?? []).map((r) => mapGoalFromDb(r, userId));
   const transactions: Transaction[] = (txRes.data ?? []).map(mapTxFromDb);
   const valuations: WalletValuation[] = (valRes.data ?? []).map(mapValuationFromDb);
   let templates: QuickTemplate[] = (tplRes.data ?? []).map(mapTemplateFromDb);
-  let investmentProducts: InvestmentProduct[] = (prodRes.data ?? []).map(mapProductFromDb);
-  const goalContributions: GoalContribution[] = (contribRes.data ?? []).map(mapContributionFromDb);
-  const goalInvites: GoalInvite[] = (inviteRes.data ?? []).map(mapInviteFromDb);
+
+  const allProducts: InvestmentProduct[] = (prodRes.data ?? []).map(mapProductFromDb);
+  // Keep ONLY own products inside dataset.investmentProducts so peer assets NEVER inflate personal Net Worth
+  let investmentProducts: InvestmentProduct[] = allProducts.filter(
+    (p) => !p.ownerId || p.ownerId === userId
+  );
+  const peerProductsByGoal = new Map<string, InvestmentProduct[]>();
+  for (const p of allProducts) {
+    if (p.ownerId && p.ownerId !== userId && p.goalId) {
+      const list = peerProductsByGoal.get(p.goalId) ?? [];
+      list.push(p);
+      peerProductsByGoal.set(p.goalId, list);
+    }
+  }
+
   const recurringRules: RecurringRule[] = (recRes.data ?? []).map(mapRecurringFromDb);
 
   const aiMemory: AIMemory = memRes.data
@@ -232,15 +244,120 @@ export async function loadSupabaseDataset(
         lastSyncedAt: null,
       };
 
+  let seededInvites: GoalInvite[] = [];
+
   // First-time cloud seeding
   if (wallets.length === 0 && categories.length === 0) {
     const seeded = await seedSupabaseUser(supabase, userId);
     wallets = seeded.wallets;
     categories = seeded.categories;
     subcategories = seeded.subcategories;
-    goals = seeded.goals;
+    // Preserve any joined shared goals if somehow already present
+    const joinedGoals = goals.filter((g) => g.sharedRole === 'member');
+    goals = [...joinedGoals, ...seeded.goals];
     templates = seeded.templates;
     investmentProducts = seeded.investmentProducts;
+    seededInvites = seeded.goalInvites;
+  }
+
+  // Sort so joined shared goals appear prominently alongside own goals
+  goals = [...goals].sort(
+    (a, b) =>
+      (a.sharedRole === 'member' ? 0 : 1) - (b.sharedRole === 'member' ? 0 : 1) ||
+      a.priority - b.priority
+  );
+
+  const accessibleGoalIds = goals.map((g) => g.id);
+  const sharedGoalIds = goals.filter((g) => g.isShared).map((g) => g.id);
+
+  let goalContributions: GoalContribution[] = [];
+  let goalInvites: GoalInvite[] = seededInvites;
+
+  if (accessibleGoalIds.length > 0) {
+    const [contribRes, inviteRes] = await Promise.all([
+      supabase
+        .from('goal_contributions')
+        .select('*')
+        .in('goal_id', accessibleGoalIds)
+        .order('date', { ascending: false }),
+      supabase.from('goal_invites').select('*').in('goal_id', accessibleGoalIds),
+    ]);
+    goalContributions = (contribRes.data ?? []).map(mapContributionFromDb);
+    const dbInvites = (inviteRes.data ?? []).map(mapInviteFromDb);
+    if (dbInvites.length > 0) {
+      goalInvites = dbInvites;
+    }
+  }
+
+  // Fetch safe peer display names & peer non-Bibit saving totals via Migration 002 RPCs
+  // Wrapped gracefully so the app stays healthy even before SQL 002 is executed
+  const sharedGoalPeers: Record<string, SharedGoalPeerData> = {};
+  if (sharedGoalIds.length > 0) {
+    type PeerRow = {
+      goal_id: string;
+      owner_id: string;
+      owner_name: string | null;
+      member_user_id: string | null;
+      member_name: string | null;
+      share_percent: number | null;
+    };
+    type TxTotalRow = {
+      goal_id: string;
+      user_id: string;
+      tx_saved: number | string;
+    };
+
+    let peerRows: PeerRow[] = [];
+    let txTotalRows: TxTotalRow[] = [];
+    try {
+      const [peersRpc, txRpc] = await Promise.all([
+        supabase.rpc('get_shared_goal_peers', { p_goal_ids: sharedGoalIds }),
+        supabase.rpc('get_shared_goal_tx_totals', { p_goal_ids: sharedGoalIds }),
+      ]);
+      if (!peersRpc.error && Array.isArray(peersRpc.data)) {
+        peerRows = peersRpc.data as PeerRow[];
+      }
+      if (!txRpc.error && Array.isArray(txRpc.data)) {
+        txTotalRows = txRpc.data as TxTotalRow[];
+      }
+    } catch {
+      // Migration 002 not applied yet — degrade gracefully without crashing
+    }
+
+    for (const g of goals) {
+      if (!g.isShared) continue;
+      const matchingPeers = peerRows.filter((r) => r.goal_id === g.id);
+      const bestPeer =
+        matchingPeers.find((r) => r.member_user_id && r.member_user_id !== userId) ??
+        matchingPeers.find((r) => r.member_user_id) ??
+        matchingPeers[0];
+
+      const invite = goalInvites.find((i) => i.goalId === g.id);
+      const viewerRole: 'owner' | 'member' = g.ownerId && g.ownerId !== userId ? 'member' : 'owner';
+
+      const peerTxSaved = txTotalRows
+        .filter((r) => r.goal_id === g.id && r.user_id !== userId)
+        .reduce((sum, r) => sum + Number(r.tx_saved ?? 0), 0);
+
+      const ownerName = bestPeer?.owner_name?.trim() || 'Pasangan';
+      const memberName = bestPeer?.member_name?.trim() || invite?.partnerName || null;
+
+      if (viewerRole === 'member') {
+        g.ownerName = ownerName;
+      }
+
+      sharedGoalPeers[g.id] = {
+        goalId: g.id,
+        ownerId: bestPeer?.owner_id ?? g.ownerId ?? userId,
+        ownerName,
+        memberId: bestPeer?.member_user_id ?? (viewerRole === 'member' ? userId : null),
+        memberName,
+        sharePercent: Number(bestPeer?.share_percent ?? invite?.sharePercent ?? 50),
+        viewerRole,
+        peerProducts: peerProductsByGoal.get(g.id) ?? [],
+        peerTxSaved,
+      };
+    }
   }
 
   return {
@@ -254,11 +371,77 @@ export async function loadSupabaseDataset(
     investmentProducts,
     goalContributions,
     goalInvites,
+    sharedGoalPeers,
     recurringRules,
     aiMemory,
     sheetsSync,
     templates,
   };
+}
+
+export async function joinSharedGoalByCode(
+  supabase: SupabaseClient,
+  code: string
+): Promise<{ ok: boolean; goalId?: string; goalName?: string; ownerName?: string; error?: string }> {
+  const cleaned = code.trim().toUpperCase();
+  if (!cleaned) {
+    return { ok: false, error: 'Masukkan kode undangan dari pasanganmu.' };
+  }
+  try {
+    const { data, error } = await supabase.rpc('join_shared_goal', { p_code: cleaned });
+    if (error) {
+      const msg = (error.message || '').toLowerCase();
+      if (
+        error.code === 'PGRST202' ||
+        msg.includes('could not find the function') ||
+        msg.includes('does not exist')
+      ) {
+        return {
+          ok: false,
+          error:
+            'Database Supabase belum menjalankan migrasi Shared Goals. Jalankan file SQL 002_shared_goals_sync.sql di Supabase SQL Editor dulu ya.',
+        };
+      }
+      return { ok: false, error: error.message || 'Gagal bergabung ke goal bersama.' };
+    }
+    const payload = (data ?? {}) as {
+      ok?: boolean;
+      goal_id?: string;
+      goal_name?: string;
+      owner_name?: string;
+      error?: string;
+    };
+    if (!payload.ok) {
+      return { ok: false, error: payload.error || 'Kode undangan tidak valid.' };
+    }
+    return {
+      ok: true,
+      goalId: payload.goal_id,
+      goalName: payload.goal_name,
+      ownerName: payload.owner_name,
+    };
+  } catch {
+    return { ok: false, error: 'Gagal terhubung ke server Supabase. Cek koneksi internetmu.' };
+  }
+}
+
+export async function leaveSharedGoalById(
+  supabase: SupabaseClient,
+  goalId: string
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { data, error } = await supabase.rpc('leave_shared_goal', { p_goal_id: goalId });
+    if (error) {
+      return { ok: false, error: error.message || 'Gagal keluar dari goal bersama.' };
+    }
+    const payload = (data ?? {}) as { ok?: boolean; error?: string };
+    if (!payload.ok) {
+      return { ok: false, error: payload.error || 'Gagal keluar dari goal bersama.' };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'Gagal terhubung ke server Supabase.' };
+  }
 }
 
 async function seedSupabaseUser(supabase: SupabaseClient, userId: string) {
@@ -286,20 +469,34 @@ async function seedSupabaseUser(supabase: SupabaseClient, userId: string) {
     return { ...s, id: newId, categoryId: catIdMap.get(s.categoryId) ?? s.categoryId };
   });
 
-  const seedGoals = createSeedGoals().map((g) => {
+  const seedGoals: Goal[] = createSeedGoals().map((g) => {
     const newId = generateUUID();
     goalIdMap.set(g.id, newId);
     return {
       ...g,
       id: newId,
+      ownerId: userId,
+      sharedRole: 'owner',
       walletId: g.walletId ? walletIdMap.get(g.walletId) ?? null : null,
       subcategoryId: g.subcategoryId ? subIdMap.get(g.subcategoryId) ?? null : null,
     };
   });
 
-  const seedProducts = createSeedInvestmentProducts(today).map((p) => ({
+  const seedGoalInvites: GoalInvite[] = seedGoals
+    .filter((g) => g.isShared)
+    .map((g) => ({
+      goalId: g.id,
+      code: generateInviteCode(),
+      partnerName: 'Pasangan',
+      partnerEmail: '',
+      sharePercent: 50,
+      status: 'pending',
+    }));
+
+  const seedProducts: InvestmentProduct[] = createSeedInvestmentProducts(today).map((p) => ({
     ...p,
     id: generateUUID(),
+    ownerId: userId,
     walletId: walletIdMap.get(p.walletId) ?? seedWallets[0].id,
     goalId: p.goalId ? goalIdMap.get(p.goalId) ?? null : null,
   }));
@@ -317,6 +514,9 @@ async function seedSupabaseUser(supabase: SupabaseClient, userId: string) {
   await supabase.from('categories').insert(seedCategories.map((c) => mapCategoryToDb(c, userId)));
   await supabase.from('subcategories').insert(seedSubcategories.map((s) => mapSubToDb(s, userId)));
   await supabase.from('goals').insert(seedGoals.map((g) => mapGoalToDb(g, userId)));
+  if (seedGoalInvites.length > 0) {
+    await supabase.from('goal_invites').insert(seedGoalInvites.map((i) => mapInviteToDb(i, userId)));
+  }
   await supabase.from('investment_products').insert(seedProducts.map((p) => mapProductToDb(p, userId)));
   await supabase.from('templates').insert(
     seedTemplates.map((t, idx) => ({
@@ -333,6 +533,7 @@ async function seedSupabaseUser(supabase: SupabaseClient, userId: string) {
     categories: seedCategories,
     subcategories: seedSubcategories,
     goals: seedGoals,
+    goalInvites: seedGoalInvites,
     investmentProducts: seedProducts,
     templates: seedTemplates,
   };
@@ -433,9 +634,12 @@ export function mapSubToDb(s: Subcategory, ownerId: string) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapGoalFromDb(r: any): Goal {
+function mapGoalFromDb(r: any, viewerUserId?: string): Goal {
+  const ownerId = r.owner_id ?? undefined;
   return {
     id: r.id,
+    ownerId,
+    sharedRole: viewerUserId && ownerId && ownerId !== viewerUserId ? 'member' : 'owner',
     name: r.name,
     icon: r.icon,
     targetAmount: Number(r.target_amount ?? 0),
@@ -470,6 +674,7 @@ export function mapGoalToDb(g: Goal, ownerId: string) {
 function mapProductFromDb(r: any): InvestmentProduct {
   return {
     id: r.id,
+    ownerId: r.owner_id ?? undefined,
     walletId: r.wallet_id,
     goalId: r.goal_id ?? null,
     name: r.name,
@@ -503,6 +708,7 @@ function mapContributionFromDb(r: any): GoalContribution {
   return {
     id: r.id,
     goalId: r.goal_id,
+    contributorUserId: r.contributor_user_id ?? r.owner_id ?? null,
     contributorName: r.contributor_name ?? 'Pasangan',
     isPartner: Boolean(r.is_partner),
     amount: Number(r.amount ?? 0),
@@ -512,8 +718,12 @@ function mapContributionFromDb(r: any): GoalContribution {
   };
 }
 
-export function mapContributionToDb(c: GoalContribution, ownerId: string) {
-  return {
+export function mapContributionToDb(
+  c: GoalContribution,
+  ownerId: string,
+  includeContributorUserId = true
+) {
+  const base = {
     id: c.id,
     owner_id: ownerId,
     goal_id: c.goalId,
@@ -524,13 +734,16 @@ export function mapContributionToDb(c: GoalContribution, ownerId: string) {
     product_name: c.productName ?? '',
     note: c.note,
   };
+  return includeContributorUserId
+    ? { ...base, contributor_user_id: c.contributorUserId ?? ownerId }
+    : base;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapInviteFromDb(r: any): GoalInvite {
   return {
     goalId: r.goal_id,
-    code: r.code,
+    code: String(r.code ?? '').trim().toUpperCase(),
     partnerName: r.partner_name ?? 'Pasangan',
     partnerEmail: r.partner_email ?? '',
     sharePercent: Number(r.share_percent ?? 50),
@@ -542,7 +755,7 @@ export function mapInviteToDb(inv: GoalInvite, ownerId: string) {
   return {
     goal_id: inv.goalId,
     owner_id: ownerId,
-    code: inv.code,
+    code: inv.code.trim().toUpperCase(),
     partner_name: inv.partnerName,
     partner_email: inv.partnerEmail,
     share_percent: inv.sharePercent,

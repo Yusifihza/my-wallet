@@ -12,6 +12,7 @@ import {
   calculateWalletBalances,
   calculateZeroBasedAllocation,
   formatIDR,
+  generateInviteCode,
   getPeriodRange,
   parseAmountExpression,
 } from '@/lib/finance';
@@ -22,7 +23,13 @@ import {
   createSeedWallets,
 } from '@/lib/seed';
 import { normalizeSupabaseKey, normalizeSupabaseUrl } from '@/lib/supabase/client';
-import type { Transaction, WalletValuation } from '@/types/finance';
+import type {
+  GoalContribution,
+  InvestmentProduct,
+  SharedGoalPeerData,
+  Transaction,
+  WalletValuation,
+} from '@/types/finance';
 
 describe('parseAmountExpression', () => {
   it('parses plain numbers and Indonesian shorthand', () => {
@@ -465,6 +472,183 @@ describe('Phase 2 & 3: Bibit Multi-Product, Shared Wedding Goal, Dummy Data, Ana
     expect(matchSubcategoryFallback('Apotek Kimia Farma Vitamin C', ds.categories, ds.subcategories)).toBe(
       obatSub
     );
+  });
+
+  it('generates unambiguous unique invite codes and keeps cross-account Shared Goals 100% symmetrical', () => {
+    const codes = new Set(Array.from({ length: 20 }, () => generateInviteCode()));
+    expect(codes.size).toBe(20);
+    for (const c of codes) {
+      expect(c).toMatch(/^MW-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{4}-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{2}$/);
+    }
+
+    const goal = { ...createSeedGoals()[0], ownerId: 'user_owner', isShared: true };
+    const ref = new Date('2026-11-25T00:00:00Z');
+
+    // Owner's Bibit products (5.2jt + 3.1jt = 8.3jt; modal 8jt; gain +300k)
+    const ownerProducts: InvestmentProduct[] = [
+      {
+        id: 'p_own_pu',
+        ownerId: 'user_owner',
+        walletId: 'w_bibit_own',
+        goalId: goal.id,
+        name: 'Pasar Uang (PU)',
+        assetClass: 'pu',
+        investedAmount: 5000000,
+        marketValue: 5200000,
+        color: '#10b981',
+        updatedAt: '2026-11-25',
+        sortOrder: 1,
+      },
+      {
+        id: 'p_own_ob',
+        ownerId: 'user_owner',
+        walletId: 'w_bibit_own',
+        goalId: goal.id,
+        name: 'Obligasi',
+        assetClass: 'obligasi',
+        investedAmount: 3000000,
+        marketValue: 3100000,
+        color: '#14b8a6',
+        updatedAt: '2026-11-25',
+        sortOrder: 2,
+      },
+    ];
+
+    // Owner's saving txs: 1jt non-product (counted) + 500k linked to p_own_pu (NOT double-counted)
+    const ownerTxs: Transaction[] = [
+      {
+        id: 'tx_o1',
+        date: '2026-11-10',
+        type: 'saving',
+        subcategoryId: null,
+        walletId: 'w_jago',
+        toWalletId: 'w_bibit_own',
+        amount: 1000000,
+        fee: 0,
+        goalId: goal.id,
+        investmentProductId: null,
+        note: 'Tabungan cash wedding',
+        createdAt: '2026-11-10T09:00:00Z',
+      },
+      {
+        id: 'tx_o2',
+        date: '2026-11-12',
+        type: 'saving',
+        subcategoryId: null,
+        walletId: 'w_jago',
+        toWalletId: 'w_bibit_own',
+        amount: 500000,
+        fee: 0,
+        goalId: goal.id,
+        investmentProductId: 'p_own_pu',
+        note: 'Top up PU',
+        createdAt: '2026-11-12T09:00:00Z',
+      },
+    ];
+
+    // Partner's Bibit product (4.15jt; modal 4jt; gain +150k) + 500k non-product tx + 2jt manual contrib
+    const partnerProducts: InvestmentProduct[] = [
+      {
+        id: 'p_part_sbn',
+        ownerId: 'user_partner',
+        walletId: 'w_bibit_partner',
+        goalId: goal.id,
+        name: 'SBN',
+        assetClass: 'sbn',
+        investedAmount: 4000000,
+        marketValue: 4150000,
+        color: '#38bdf8',
+        updatedAt: '2026-11-25',
+        sortOrder: 1,
+      },
+    ];
+
+    const partnerTxs: Transaction[] = [
+      {
+        id: 'tx_p1',
+        date: '2026-11-15',
+        type: 'saving',
+        subcategoryId: null,
+        walletId: 'w_bca_partner',
+        toWalletId: 'w_bibit_partner',
+        amount: 500000,
+        fee: 0,
+        goalId: goal.id,
+        investmentProductId: null,
+        note: 'Setoran bank',
+        createdAt: '2026-11-15T09:00:00Z',
+      },
+    ];
+
+    const manualContribs: GoalContribution[] = [
+      {
+        id: 'c1',
+        goalId: goal.id,
+        contributorUserId: 'user_partner',
+        contributorName: 'Ayu',
+        isPartner: true,
+        amount: 2000000,
+        date: '2026-11-18',
+        productName: 'Pasar Uang (PU)',
+        note: 'Bonus',
+      },
+    ];
+
+    const peerSeenByOwner: SharedGoalPeerData = {
+      goalId: goal.id,
+      ownerId: 'user_owner',
+      ownerName: 'Iza',
+      memberId: 'user_partner',
+      memberName: 'Ayu',
+      sharePercent: 50,
+      viewerRole: 'owner',
+      peerProducts: partnerProducts,
+      peerTxSaved: 500000,
+    };
+
+    const peerSeenByPartner: SharedGoalPeerData = {
+      goalId: goal.id,
+      ownerId: 'user_owner',
+      ownerName: 'Iza',
+      memberId: 'user_partner',
+      memberName: 'Ayu',
+      sharePercent: 50,
+      viewerRole: 'member',
+      peerProducts: ownerProducts,
+      peerTxSaved: 1000000,
+    };
+
+    const ownerView = calculateGoalProgress(
+      { ...goal, sharedRole: 'owner' },
+      ownerTxs,
+      ref,
+      manualContribs,
+      ownerProducts,
+      peerSeenByOwner
+    );
+
+    const partnerView = calculateGoalProgress(
+      { ...goal, sharedRole: 'member', ownerName: 'Iza' },
+      partnerTxs,
+      ref,
+      manualContribs,
+      partnerProducts,
+      peerSeenByPartner
+    );
+
+    // Owner sees: mySaved = 9.3jt, partnerSaved = 6.65jt, total = 15.95jt
+    expect(ownerView.mySaved).toBe(9300000);
+    expect(ownerView.partnerSaved).toBe(6650000);
+    expect(ownerView.saved).toBe(15950000);
+    expect(ownerView.peerLinkedProducts.length).toBe(1);
+    expect(ownerView.partnerMarketGain).toBe(150000);
+
+    // Partner sees exact mirror: mySaved = 6.65jt, partnerSaved = 9.3jt, total = 15.95jt
+    expect(partnerView.mySaved).toBe(6650000);
+    expect(partnerView.partnerSaved).toBe(9300000);
+    expect(partnerView.saved).toBe(ownerView.saved);
+    expect(partnerView.peerLinkedProducts.length).toBe(2);
+    expect(partnerView.partnerMarketGain).toBe(300000);
   });
 });
 

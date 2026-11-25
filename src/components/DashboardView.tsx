@@ -642,7 +642,8 @@ export function DashboardView() {
                 dataset.transactions,
                 nowDate,
                 dataset.goalContributions,
-                dataset.investmentProducts
+                dataset.investmentProducts,
+                dataset.sharedGoalPeers?.[g.id]
               );
               return (
                 <div key={g.id} className="p-3 rounded-xl bg-[var(--mw-surface-2)] space-y-2">
