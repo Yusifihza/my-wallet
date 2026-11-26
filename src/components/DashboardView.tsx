@@ -14,6 +14,7 @@ import {
   Plus,
   Sparkles,
   TrendingUp,
+  X,
 } from 'lucide-react';
 import {
   Bar,
@@ -55,6 +56,25 @@ export function DashboardView() {
 
   const privacy = dataset.profile.privacyMode;
   const today = todayISO();
+
+  const dismissStorageKey = `mw_hide_dummy_banner_v1:${dataset.profile.id}`;
+  const [dummyBannerDismissed, setDummyBannerDismissed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.localStorage.getItem(`mw_hide_dummy_banner_v1:${dataset.profile.id}`) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleDismissDummyBanner = () => {
+    setDummyBannerDismissed(true);
+    try {
+      window.localStorage.setItem(dismissStorageKey, 'true');
+    } catch {
+      // Ignore storage quota / privacy mode errors
+    }
+  };
 
   // Donut drill-down state: null = top-level categories, string = specific categoryId
   const [drillCatId, setDrillCatId] = useState<string | null>(null);
@@ -191,31 +211,42 @@ export function DashboardView() {
         </div>
       </div>
 
-      {/* AI Advisor Quick Highlight Strip (or 1-Click Dummy Data Starter when empty) */}
+      {/* AI Advisor Quick Highlight Strip (or 1-Click Dummy Data Starter when empty & not dismissed) */}
       {dataset.transactions.length === 0 ? (
-        <div className="mw-card rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="w-8 h-8 rounded-xl bg-[var(--mw-primary-soft)] text-[var(--mw-primary)] flex items-center justify-center shrink-0">
-              <FlaskConical className="w-4 h-4" />
-            </span>
-            <div className="min-w-0">
-              <div className="font-semibold text-[var(--mw-text)]">
-                Ingin lihat grafik MoM, Heatmap, Portofolio Bibit 5 Produk, &amp; AI Advisor langsung hidup?
-              </div>
-              <div className="text-[var(--mw-text-muted)]">
-                Coba muat Data Dummy 3 Bulan — bisa dihapus kembali ke 0 dalam 1 klik kapan saja.
+        !dummyBannerDismissed && (
+          <div className="mw-card rounded-2xl p-4 pr-12 relative flex flex-wrap items-center justify-between gap-3 text-xs">
+            <button
+              type="button"
+              onClick={handleDismissDummyBanner}
+              aria-label="Tutup banner Muat Data Dummy"
+              title="Tutup"
+              className="absolute top-3 right-3 p-1.5 rounded-lg bg-[var(--mw-surface-2)] text-[var(--mw-text-muted)] hover:text-[var(--mw-text)] hover:bg-[var(--mw-surface-3)] transition cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="w-8 h-8 rounded-xl bg-[var(--mw-primary-soft)] text-[var(--mw-primary)] flex items-center justify-center shrink-0">
+                <FlaskConical className="w-4 h-4" />
+              </span>
+              <div className="min-w-0">
+                <div className="font-semibold text-[var(--mw-text)]">
+                  Ingin lihat grafik MoM, Heatmap, Portofolio Bibit 5 Produk, &amp; AI Advisor langsung hidup?
+                </div>
+                <div className="text-[var(--mw-text-muted)]">
+                  Coba muat Data Dummy 3 Bulan — bisa dihapus kembali ke 0 dalam 1 klik kapan saja.
+                </div>
               </div>
             </div>
+            <button
+              type="button"
+              onClick={loadThreeMonthDummyData}
+              className="px-3.5 py-2 rounded-xl font-semibold text-white shrink-0 cursor-pointer"
+              style={{ background: 'var(--mw-primary)' }}
+            >
+              🧪 Muat Data Dummy 3 Bulan
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={loadThreeMonthDummyData}
-            className="px-3.5 py-2 rounded-xl font-semibold text-white shrink-0 cursor-pointer"
-            style={{ background: 'var(--mw-primary)' }}
-          >
-            🧪 Muat Data Dummy 3 Bulan
-          </button>
-        </div>
+        )
       ) : (
         <Link
           href="/advisor"
