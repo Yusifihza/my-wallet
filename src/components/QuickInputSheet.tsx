@@ -50,6 +50,7 @@ export function QuickInputSheet() {
 function QuickInputSheetInner() {
   const {
     dataset,
+    viewMode,
     quickInputPreset,
     closeQuickInput,
     openReceiptScanner,
@@ -59,6 +60,9 @@ function QuickInputSheetInner() {
     addTransaction,
     updateTransaction,
   } = useWallet();
+
+  const forceMobile = viewMode === 'mobile';
+  const forceDesktop = viewMode === 'desktop';
 
   const today = todayISO();
   const privacy = dataset.profile.privacyMode;
@@ -1523,16 +1527,37 @@ function QuickInputSheetInner() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end md:items-stretch md:justify-end"
+      className={`fixed inset-0 z-50 flex ${
+        forceMobile
+          ? 'items-end justify-center'
+          : forceDesktop
+            ? 'items-stretch justify-end'
+            : 'items-end md:items-stretch md:justify-end'
+      }`}
       style={{ background: 'var(--mw-backdrop)' }}
     >
       {/* Backdrop click closes */}
-      <div className="flex-1" onClick={closeQuickInput} />
+      <div
+        className={forceMobile ? 'fixed inset-0' : 'flex-1'}
+        onClick={closeQuickInput}
+      />
 
       {/* Container */}
-      <div className="relative w-full md:w-[440px] max-h-[94dvh] md:max-h-none md:h-full bg-[var(--mw-surface)] rounded-t-3xl md:rounded-none md:border-l border-t md:border-t-0 border-[var(--mw-border)] flex flex-col animate-sheet-up md:animate-panel-right overflow-hidden">
+      <div
+        className={`relative bg-[var(--mw-surface)] border-[var(--mw-border)] flex flex-col overflow-hidden ${
+          forceMobile
+            ? 'w-full max-w-[480px] max-h-[94dvh] rounded-t-3xl border-t border-x animate-sheet-up'
+            : forceDesktop
+              ? 'w-[440px] h-full border-l animate-panel-right'
+              : 'w-full md:w-[440px] max-h-[94dvh] md:max-h-none md:h-full rounded-t-3xl md:rounded-none md:border-l border-t md:border-t-0 animate-sheet-up md:animate-panel-right'
+        }`}
+      >
         {/* Mobile grab handle */}
-        <div className="md:hidden pt-2 pb-0.5 flex justify-center">
+        <div
+          className={`${
+            forceMobile ? 'flex' : forceDesktop ? 'hidden' : 'md:hidden flex'
+          } pt-2 pb-0.5 justify-center`}
+        >
           <div className="w-10 h-1 rounded-full bg-[var(--mw-border)]" />
         </div>
 
@@ -1542,7 +1567,11 @@ function QuickInputSheetInner() {
             <h2 className="text-sm md:text-base font-bold text-[var(--mw-text)] truncate">
               {isEdit ? 'Edit Transaksi' : 'Tambah Transaksi'}
             </h2>
-            <p className="hidden md:block text-xs text-[var(--mw-text-muted)]">
+            <p
+              className={`${
+                forceMobile ? 'hidden' : forceDesktop ? 'block' : 'hidden md:block'
+              } text-xs text-[var(--mw-text-muted)]`}
+            >
               Shortcut: ketik 25rb, 1,5jt, atau 45k+12k · Ctrl+Enter simpan
             </p>
           </div>
@@ -1598,7 +1627,11 @@ function QuickInputSheetInner() {
           )}
 
           {/* MOBILE AMOUNT DISPLAY (Custom Numpad Driven — No Confusing Text Hint) */}
-          <div className="md:hidden text-center py-1">
+          <div
+            className={`${
+              forceMobile ? 'block' : forceDesktop ? 'hidden' : 'md:hidden'
+            } text-center py-1`}
+          >
             {parsedAmount.isExpression ? (
               <div className="text-xs text-[var(--mw-text-muted)] tab-num">
                 {parsedAmount.displayExpression} =
@@ -1623,7 +1656,11 @@ function QuickInputSheetInner() {
           </div>
 
           {/* DESKTOP AMOUNT INPUT (Keyboard Driven — Supports 25rb, 1,5jt, 45k+12k) */}
-          <div className="hidden md:block p-3.5 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)] space-y-1.5">
+          <div
+            className={`${
+              forceMobile ? 'hidden' : forceDesktop ? 'block' : 'hidden md:block'
+            } p-3.5 rounded-2xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)] space-y-1.5`}
+          >
             <label
               htmlFor="desktop-amount-input"
               className="text-xs font-medium text-[var(--mw-text-muted)] block"
@@ -1694,7 +1731,11 @@ function QuickInputSheetInner() {
         </div>
 
         {/* MOBILE CUSTOM NUMPAD FOOTER */}
-        <div className="md:hidden px-4 pt-2 pb-safe border-t border-[var(--mw-border)] bg-[var(--mw-surface)] space-y-2">
+        <div
+          className={`${
+            forceMobile ? 'block' : forceDesktop ? 'hidden' : 'md:hidden'
+          } px-4 pt-2 pb-safe border-t border-[var(--mw-border)] bg-[var(--mw-surface)] space-y-2`}
+        >
           <div className="flex items-center justify-between gap-1.5">
             <div className="flex items-center gap-1">
               <button
@@ -1773,7 +1814,11 @@ function QuickInputSheetInner() {
         </div>
 
         {/* DESKTOP SAVE FOOTER */}
-        <div className="hidden md:flex items-center gap-2 px-5 py-4 border-t border-[var(--mw-border)] bg-[var(--mw-surface)]">
+        <div
+          className={`${
+            forceMobile ? 'hidden' : forceDesktop ? 'flex' : 'hidden md:flex'
+          } items-center gap-2 px-5 py-4 border-t border-[var(--mw-border)] bg-[var(--mw-surface)]`}
+        >
           <button
             type="button"
             onClick={closeQuickInput}

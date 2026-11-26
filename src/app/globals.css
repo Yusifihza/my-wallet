@@ -151,3 +151,25 @@ html[data-theme="light"] .mw-hero-gradient {
 .animate-panel-right {
   animation: slideInRight 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+/* Forced Mobile View (when selected manually on desktop/tablet screens) */
+html[data-view-mode="mobile"] main .lg\:grid-cols-12,
+html[data-view-mode="mobile"] main .lg\:grid-cols-4,
+html[data-view-mode="mobile"] main .lg\:grid-cols-3,
+html[data-view-mode="mobile"] main .lg\:grid-cols-2,
+html[data-view-mode="mobile"] main .md\:grid-cols-3,
+html[data-view-mode="mobile"] main .md\:grid-cols-2,
+html[data-view-mode="mobile"] main .sm\:grid-cols-4,
+html[data-view-mode="mobile"] main .sm\:grid-cols-3 {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+html[data-view-mode="mobile"] main [class*="lg:col-span-"],
+html[data-view-mode="mobile"] main [class*="md:col-span-"] {
+  grid-column: span 1 / span 1 !important;
+}
+
+/* Forced Desktop View fallback (ensures desktop layout even on browsers/PWAs that lock viewport meta) */
+html[data-view-mode="desktop"] body {
+  min-width: 1080px;
+}

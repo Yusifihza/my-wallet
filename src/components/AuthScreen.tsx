@@ -20,10 +20,11 @@ export function AuthScreen() {
     signInWithGoogle,
     signInWithEmail,
     signUpWithEmail,
+    sendPasswordReset,
     continueLocalMode,
   } = useWallet();
 
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [mode, setMode] = useState<'login' | 'register' | 'reset'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -52,9 +53,11 @@ export function AuthScreen() {
     setBusy(true);
     try {
       const res =
-        mode === 'login'
-          ? await signInWithEmail(email, password)
-          : await signUpWithEmail(email, password, displayName);
+        mode === 'reset'
+          ? await sendPasswordReset(email)
+          : mode === 'login'
+            ? await signInWithEmail(email, password)
+            : await signUpWithEmail(email, password, displayName);
       if (res.error) setErrorMsg(res.error);
       if (res.message) setInfoMsg(res.message);
     } finally {
@@ -103,8 +106,8 @@ export function AuthScreen() {
                   }}
                   className="py-1.5 rounded-lg cursor-pointer transition"
                   style={{
-                    background: mode === 'login' ? 'var(--mw-primary-soft)' : 'transparent',
-                    color: mode === 'login' ? 'var(--mw-primary)' : 'var(--mw-text-muted)',
+                    background: mode !== 'register' ? 'var(--mw-primary-soft)' : 'transparent',
+                    color: mode !== 'register' ? 'var(--mw-primary)' : 'var(--mw-text-muted)',
                   }}
                 >
                   Masuk Email
@@ -127,6 +130,11 @@ export function AuthScreen() {
               </div>
 
               <form onSubmit={handleEmailSubmit} className="space-y-2.5 text-xs">
+                {mode === 'reset' && (
+                  <p className="text-[11px] text-[var(--mw-text-muted)] leading-relaxed">
+                    Masukkan email akunmu untuk menerima link buat/reset password baru.
+                  </p>
+                )}
                 {mode === 'register' && (
                   <div className="relative">
                     <User className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mw-text-dim)]" />
@@ -150,18 +158,36 @@ export function AuthScreen() {
                     className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-[var(--mw-surface)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none focus:border-[var(--mw-primary)]"
                   />
                 </div>
-                <div className="relative">
-                  <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mw-text-dim)]" />
-                  <input
-                    type="password"
-                    required
-                    minLength={6}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Password (minimal 6 karakter)"
-                    className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-[var(--mw-surface)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none focus:border-[var(--mw-primary)]"
-                  />
-                </div>
+                {mode !== 'reset' && (
+                  <div className="relative">
+                    <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mw-text-dim)]" />
+                    <input
+                      type="password"
+                      required
+                      minLength={6}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Password (minimal 6 karakter)"
+                      className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-[var(--mw-surface)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none focus:border-[var(--mw-primary)]"
+                    />
+                  </div>
+                )}
+
+                {mode === 'login' && (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode('reset');
+                        setErrorMsg(null);
+                        setInfoMsg(null);
+                      }}
+                      className="text-[11px] font-medium text-[var(--mw-primary)] hover:underline cursor-pointer"
+                    >
+                      Lupa atau belum punya password?
+                    </button>
+                  </div>
+                )}
 
                 {errorMsg && (
                   <div
@@ -189,12 +215,28 @@ export function AuthScreen() {
                   <span>
                     {busy
                       ? 'Memproses...'
-                      : mode === 'login'
-                        ? 'Masuk dengan Email'
-                        : 'Buat Akun Baru'}
+                      : mode === 'reset'
+                        ? 'Kirim Link Buat / Reset Password'
+                        : mode === 'login'
+                          ? 'Masuk dengan Email'
+                          : 'Buat Akun Baru'}
                   </span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
+
+                {mode === 'reset' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setErrorMsg(null);
+                      setInfoMsg(null);
+                    }}
+                    className="w-full py-1.5 text-[11px] font-medium text-[var(--mw-text-muted)] hover:text-[var(--mw-text)] cursor-pointer"
+                  >
+                    ← Kembali ke Masuk Email
+                  </button>
+                )}
               </form>
             </div>
 

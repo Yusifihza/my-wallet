@@ -55,6 +55,7 @@ import type {
   ThemePreference,
   Transaction,
   TransactionType,
+  ViewModePreference,
   Wallet,
   WalletBalanceSummary,
   WalletGroup,
@@ -89,6 +90,8 @@ interface WalletContextValue {
   authMode: 'unauthenticated' | 'local' | 'supabase';
   supabaseConfigured: boolean;
   dataset: AppDataset;
+  viewMode: ViewModePreference;
+  setViewMode: (mode: ViewModePreference) => void;
   period: PeriodPreset;
   setPeriod: (p: PeriodPreset) => void;
   periodLabel: string;
@@ -118,6 +121,8 @@ interface WalletContextValue {
     password: string,
     displayName: string
   ) => Promise<AuthActionResult>;
+  updatePassword: (newPassword: string) => Promise<AuthActionResult>;
+  sendPasswordReset: (email: string) => Promise<AuthActionResult>;
   continueLocalMode: () => void;
   signOut: () => Promise<void>;
   refreshCloudData: (silent?: boolean) => Promise<void>;
@@ -190,6 +195,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [authMode, setAuthMode] = useState<'unauthenticated' | 'local' | 'supabase'>('unauthenticated');
   const [cloudUserId, setCloudUserId] = useState<string | null>(null);
   const [dataset, setDataset] = useState<AppDataset>(() => createInitialDataset());
+  const [viewMode, setViewModeState] = useState<ViewModePreference>('auto');
   const [period, setPeriod] = useState<PeriodPreset>('this_month');
   const [clientNow, setClientNow] = useState<Date | null>(null);
   const [recentWalletIds, setRecentWalletIds] = useState<string[]>(['w_gopay', 'w_jago', 'w_tunai']);
@@ -203,6 +209,20 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     const id = generateUUID();
     setToast({ id, text, undo });
   }, []);
+
+  const setViewMode = useCallback(
+    (mode: ViewModePreference) => {
+      setViewModeState(mode);
+      try {
+        window.localStorage.setItem('mw_view_mode_v1', mode);
+      } catch {
+        // Ignore storage errors
+      }
+      const label = mode === 'desktop' ? 'Mode Desktop' : mode === 'mobile' ? 'Mode Mobile' : 'Mode Otomatis';
+      showToast(`Tampilan diubah ke ${label}`);
+    },
+    [showToast]
+  );
 
   // Auto-dismiss toast after 5s
   useEffect(() => {
@@ -227,6 +247,28 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     }
   }, [dataset.profile.theme]);
 
+  // Apply desktop/mobile view mode attribute & dynamic viewport meta
+  useEffect(() => {
+    document.documentElement.setAttribute('data-view-mode', viewMode);
+    let metaViewport = document.querySelector('meta[name="viewport"]');
+    if (!metaViewport) {
+      metaViewport = document.createElement('meta');
+      metaViewport.setAttribute('name', 'viewport');
+      document.head.appendChild(metaViewport);
+    }
+    if (viewMode === 'desktop') {
+      metaViewport.setAttribute(
+        'content',
+        'width=1280, user-scalable=yes, viewport-fit=cover'
+      );
+    } else {
+      metaViewport.setAttribute(
+        'content',
+        'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover'
+      );
+    }
+  }, [viewMode]);
+
   // Register PWA Service Worker
   useEffect(() => {
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
@@ -239,6 +281,14 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     let active = true;
     async function init() {
       const now = new Date();
+      try {
+        const savedView = window.localStorage.getItem('mw_view_mode_v1');
+        if (savedView === 'mobile' || savedView === 'desktop' || savedView === 'auto') {
+          setViewModeState(savedView);
+        }
+      } catch {
+        // Ignore storage errors
+      }
       const supabase = getSupabaseBrowserClient();
       if (supabase) {
         try {
@@ -452,6 +502,50 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     },
     []
   );
+
+  const updatePassword = useCallback(
+    async (newPassword: string): Promise<AuthActionResult> => {
+      const supabase = getSupabaseBrowserClient();
+      if (!supabase) return { error: 'Supabase belum terhubung.' };
+      if (newPassword.length < 6) {
+        return { error: 'Password minimal 6 karakter.' };
+      }
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) {
+        const msg = error.message.toLowerCase();
+        if (msg.includes('same password') || msg.includes('different from the old')) {
+          return { error: 'Password baru harus berbeda dari password sebelumnya.' };
+        }
+        if (msg.includes('reauthentication') || msg.includes('nonce')) {
+          return {
+            error: 'Demi keamanan, silakan keluar lalu masuk kembali terlebih dahulu sebelum mengganti password.',
+          };
+        }
+        return { error: error.message };
+      }
+      showToast('Password akun berhasil disimpan!');
+      return {
+        message:
+          'Password berhasil disimpan! Sekarang kamu bisa masuk dengan Email & Password ini maupun dengan Google.',
+      };
+    },
+    [showToast]
+  );
+
+  const sendPasswordReset = useCallback(async (email: string): Promise<AuthActionResult> => {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) return { error: 'Supabase belum terhubung.' };
+    const cleanEmail = email.trim();
+    if (!cleanEmail) return { error: 'Masukkan alamat email akunmu.' };
+    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+      redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent('/settings?set_password=1')}`,
+    });
+    if (error) return { error: error.message };
+    return {
+      message:
+        'Link buat/reset password telah dikirim ke emailmu. Cek kotak masuk (atau folder Spam), lalu klik link tersebut.',
+    };
+  }, []);
 
   const continueLocalMode = useCallback(() => {
     setLocalModeOptIn(true);
@@ -1615,6 +1709,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     authMode,
     supabaseConfigured,
     dataset,
+    viewMode,
+    setViewMode,
     period,
     setPeriod,
     periodLabel: periodInfo.label,
@@ -1636,6 +1732,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     signInWithGoogle,
     signInWithEmail,
     signUpWithEmail,
+    updatePassword,
+    sendPasswordReset,
     continueLocalMode,
     signOut,
     refreshCloudData,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Check,
   Cloud,
@@ -11,16 +11,22 @@ import {
   FileSpreadsheet,
   FlaskConical,
   HardDrive,
+  KeyRound,
+  Lock,
   LogOut,
+  Monitor,
+  MonitorSmartphone,
   Moon,
   RefreshCw,
   RotateCcw,
+  Smartphone,
   Sun,
   Trash2,
 } from 'lucide-react';
 import { useWallet } from '@/context/WalletContext';
 import { buildGoogleSheetsPayload, transactionsToCSV } from '@/lib/finance';
 import { todayISO } from '@/lib/seed';
+import type { ViewModePreference } from '@/types/finance';
 
 const APPS_SCRIPT_SNIPPET = `function doPost(e) {
   var data = JSON.parse(e.postData.contents);
@@ -41,9 +47,12 @@ export function SettingsView() {
     authMode,
     supabaseConfigured,
     dataset,
+    viewMode,
+    setViewMode,
     setTheme,
     togglePrivacyMode,
     setDisplayName,
+    updatePassword,
     reopenOnboarding,
     resetLocalData,
     signOut,
@@ -56,11 +65,62 @@ export function SettingsView() {
   const [nameInput, setNameInput] = useState(dataset.profile.displayName);
   const [confirmReset, setConfirmReset] = useState(false);
 
+  // Create / Change Password state (also works for Google OAuth accounts!)
+  const [fromResetLink] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return new URLSearchParams(window.location.search).get('set_password') === '1';
+  });
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwSuccess, setPwSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!fromResetLink || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('set_password')) {
+      params.delete('set_password');
+      const nextUrl = params.toString()
+        ? `${window.location.pathname}?${params.toString()}`
+        : window.location.pathname;
+      window.history.replaceState({}, '', nextUrl);
+    }
+  }, [fromResetLink]);
+
   // Google Sheets mirror UI state
   const [webhookInput, setWebhookInput] = useState(dataset.sheetsSync.spreadsheetUrl || '');
   const [syncingSheets, setSyncingSheets] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [copiedScript, setCopiedScript] = useState(false);
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwError(null);
+    setPwSuccess(null);
+    if (newPassword.length < 6) {
+      setPwError('Password minimal 6 karakter.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPwError('Konfirmasi password tidak cocok. Ketik ulang dengan sama.');
+      return;
+    }
+    setPwBusy(true);
+    try {
+      const res = await updatePassword(newPassword);
+      if (res.error) {
+        setPwError(res.error);
+      } else {
+        setPwSuccess(res.message || 'Password berhasil disimpan!');
+        setNewPassword('');
+        setConfirmPassword('');
+      }
+    } finally {
+      setPwBusy(false);
+    }
+  };
 
   const handleExportAll = () => {
     const csv = transactionsToCSV(
@@ -114,6 +174,16 @@ export function SettingsView() {
     setTimeout(() => setCopiedScript(false), 2500);
   };
 
+  const viewOptions: {
+    value: ViewModePreference;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }[] = [
+    { value: 'auto', label: 'Otomatis', icon: MonitorSmartphone },
+    { value: 'mobile', label: 'Mobile', icon: Smartphone },
+    { value: 'desktop', label: 'Desktop', icon: Monitor },
+  ];
+
   return (
     <div className="max-w-3xl space-y-5">
       <div>
@@ -121,7 +191,7 @@ export function SettingsView() {
           Settings
         </h1>
         <p className="text-xs text-[var(--mw-text-muted)]">
-          Pengaturan tampilan, data dummy 3 bulan, mirror Google Sheets, dan koneksi cloud
+          Pengaturan tampilan, keamanan password, data dummy 3 bulan, mirror Google Sheets, dan koneksi cloud
         </p>
       </div>
 
@@ -167,7 +237,7 @@ export function SettingsView() {
         </div>
       </section>
 
-      {/* Profile & Theme */}
+      {/* Profile & Theme & View Mode */}
       <section className="mw-card rounded-2xl p-5 space-y-4">
         <h2 className="text-sm font-semibold text-[var(--mw-text)]">Profil &amp; Tampilan</h2>
 
@@ -191,6 +261,36 @@ export function SettingsView() {
             >
               Simpan
             </button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[var(--mw-border)] text-xs">
+          <div>
+            <div className="font-medium text-[var(--mw-text)]">Mode Tampilan (Desktop / Mobile)</div>
+            <div className="text-[var(--mw-text-muted)]">
+              Paksa tampilan Mobile (menu bawah) atau Desktop (sidebar lebar), atau ikuti ukuran layar
+            </div>
+          </div>
+          <div className="inline-flex p-1 rounded-xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)]">
+            {viewOptions.map((opt) => {
+              const Icon = opt.icon;
+              const active = viewMode === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setViewMode(opt.value)}
+                  className="px-2.5 sm:px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 font-medium cursor-pointer transition"
+                  style={{
+                    background: active ? 'var(--mw-primary-soft)' : 'transparent',
+                    color: active ? 'var(--mw-primary)' : 'var(--mw-text-muted)',
+                  }}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{opt.label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -251,6 +351,130 @@ export function SettingsView() {
           </button>
         </div>
       </section>
+
+      {/* Account Security: Create / Change Password */}
+      {authMode === 'supabase' && (
+        <section
+          className={`mw-card rounded-2xl p-5 space-y-3.5 text-xs ${
+            fromResetLink ? 'ring-2 ring-[var(--mw-primary)]' : ''
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <KeyRound className="w-4 h-4 text-[var(--mw-primary)]" />
+              <h2 className="text-sm font-semibold text-[var(--mw-text)]">
+                Buat / Ubah Password Akun
+              </h2>
+            </div>
+            {dataset.profile.email && (
+              <span className="px-2.5 py-1 rounded-full bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[11px] font-mono text-[var(--mw-text-muted)]">
+                {dataset.profile.email}
+              </span>
+            )}
+          </div>
+
+          {fromResetLink && (
+            <div
+              className="p-2.5 rounded-xl text-xs font-medium"
+              style={{ background: 'var(--mw-primary-soft)', color: 'var(--mw-primary)' }}
+            >
+              Verifikasi email berhasil! Silakan ketik password baru pilihanmu di bawah ini.
+            </div>
+          )}
+
+          <p className="text-[var(--mw-text-muted)] leading-relaxed">
+            Jika sebelumnya kamu masuk lewat <b>Google</b>, buat password di sini agar bisa login
+            biasa pakai <b>Email &amp; Password</b> dengan akun dan data yang sama persis.
+          </p>
+
+          <form onSubmit={handlePasswordSubmit} className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label htmlFor="set-new-pw" className="block text-[var(--mw-text-muted)] mb-1">
+                  Password Baru
+                </label>
+                <div className="relative">
+                  <Lock className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mw-text-dim)]" />
+                  <input
+                    id="set-new-pw"
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    value={newPassword}
+                    onChange={(e) => {
+                      setNewPassword(e.target.value);
+                      if (pwError) setPwError(null);
+                    }}
+                    placeholder="Minimal 6 karakter"
+                    className="w-full pl-9 pr-9 py-2.5 rounded-xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none focus:border-[var(--mw-primary)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? 'Sembunyikan password' : 'Lihat password'}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[var(--mw-text-dim)] hover:text-[var(--mw-text)] cursor-pointer"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-3.5 h-3.5" />
+                    ) : (
+                      <Eye className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="set-confirm-pw" className="block text-[var(--mw-text-muted)] mb-1">
+                  Konfirmasi Password Baru
+                </label>
+                <div className="relative">
+                  <Lock className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--mw-text-dim)]" />
+                  <input
+                    id="set-confirm-pw"
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    value={confirmPassword}
+                    onChange={(e) => {
+                      setConfirmPassword(e.target.value);
+                      if (pwError) setPwError(null);
+                    }}
+                    placeholder="Ketik ulang password"
+                    className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-[var(--mw-surface-2)] border border-[var(--mw-border)] text-[var(--mw-text)] focus:outline-none focus:border-[var(--mw-primary)]"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {pwError && (
+              <div
+                className="p-2.5 rounded-xl text-xs"
+                style={{ background: 'var(--mw-expense-soft)', color: 'var(--mw-expense)' }}
+              >
+                {pwError}
+              </div>
+            )}
+            {pwSuccess && (
+              <div
+                className="p-2.5 rounded-xl text-xs"
+                style={{ background: 'var(--mw-primary-soft)', color: 'var(--mw-primary)' }}
+              >
+                {pwSuccess}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={pwBusy || !newPassword || !confirmPassword}
+              className="px-4 py-2.5 rounded-xl text-xs font-semibold text-white inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+              style={{ background: 'var(--mw-primary)' }}
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>{pwBusy ? 'Menyimpan...' : 'Simpan Password'}</span>
+            </button>
+          </form>
+        </section>
+      )}
 
       {/* Google Sheets 1-Way Mirror */}
       <section className="mw-card rounded-2xl p-5 space-y-3.5 text-xs">

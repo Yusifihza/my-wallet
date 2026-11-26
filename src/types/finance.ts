@@ -20,6 +20,8 @@ export type TransactionType =
 
 export type ThemePreference = 'dark' | 'light' | 'system';
 
+export type ViewModePreference = 'auto' | 'mobile' | 'desktop';
+
 export type PeriodPreset =
   | 'this_month'
   | 'last_month'
